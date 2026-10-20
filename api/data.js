@@ -55,6 +55,7 @@ module.exports = async (req, res) => {
     }
     res.status(405).end();
   } catch (e) {
-    res.status(500).json({ error: 'server error' });
+    console.error('data api error:', e.message);
+    res.status(500).json({ error: 'server error', detail: String(e.message || '').slice(0, 160) });
   }
 };
