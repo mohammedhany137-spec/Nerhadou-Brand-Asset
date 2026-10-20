@@ -125,14 +125,14 @@ function audit(){if(AL===null){loadAudit();return sk()}return `<div class="bg-wh
 const $=i=>document.getElementById(i),P=['#10b981','#3b82f6','#f59e0b','#8b5cf6','#ef4444','#06b6d4','#ec4899','#84cc16'];
 const W='Waiting for Admin Approval',td=()=>new Date().toISOString().slice(0,10);
 const SEC=[
-['brand_master','01_Brand_Master','Brand identity, logos, guidelines, and core brand assets.','Use one row per asset or document.'],
-['strategy_plan','02_Strategy_and_Plan','Brand strategies, annual plans, quarterly plans, and 3H plans.','Use one row per asset or document.'],
-['claims_evidence','03_Claims_and_Evidence','Approved claims, substantiation, studies, and scientific references.','Use one row per asset or document.'],
-['approvals','04_Approvals','Medical, legal, regulatory, and other approval records.','Use one row per asset or document.'],
-['pack_leaflet','05_Pack_and_Leaflet','Packaging artwork, pack components, and patient leaflets.','Use one row per asset or document.'],
-['field_tablet','06_Field_and_Tablet','Sales representative materials, detail aids, and tablet presentations.','Use one row per asset or document.'],
-['website_social','07_Website_and_Social','Website pages, social content, and digital assets.','Use one row per asset or document.'],
-['campaigns_projects','08_Campaigns_and_Projects','Campaigns, launches, and cross-functional projects.','Use one row per asset or document.'],
+['brand_master','01_Brand_Master','Brand identity, logos, guidelines, and core brand assets.','Upload file or Drive link.'],
+['strategy_plan','02_Strategy_and_Plan','Brand strategies, annual plans, quarterly plans, and 3H plans.','Upload file or Drive link.'],
+['claims_evidence','03_Claims_and_Evidence','Approved claims, substantiation, studies, and scientific references.','Upload file or Drive link.'],
+['approvals','04_Approvals','Medical, legal, regulatory, and other approval records.','Upload file or Drive link.'],
+['pack_leaflet','05_Pack_and_Leaflet','Packaging artwork, pack components, and patient leaflets.','Upload file or Drive link.'],
+['field_tablet','06_Field_and_Tablet','Sales representative materials, detail aids, and tablet presentations.','Upload file or Drive link.'],
+['website_social','07_Website_and_Social','Website pages, social content, and digital assets.','Upload file or Drive link.'],
+['campaigns_projects','08_Campaigns_and_Projects','Campaigns, launches, and cross-functional projects.','Upload file or Drive link.'],
 ['current_approved','09_CURRENT_APPROVED','Current approved versions only. Move superseded versions to 99_Archive.','Keep only the latest currently approved versions here.'],
 ['archive','99_Archive','Superseded, withdrawn, or obsolete versions retained for reference.','Keep older or withdrawn versions here and note what replaced them.']];
 const D={portfolio:[{id:1,brand:'Vita D3 ODF',desc:'',notes:''},{id:2,brand:'Vita D3+K2 ODF',desc:'',notes:''},{id:3,brand:'Zolmsolan ODF',desc:'',notes:''},{id:4,brand:'Nerhapezil ODF',desc:'',notes:''}]};SEC.forEach(s=>D[s[0]]=[]);
