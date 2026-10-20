@@ -32,7 +32,7 @@ th{white-space:nowrap}
 </aside>
 <main class="flex-1 min-w-0">
 <header class="bg-gradient-to-r from-white via-emerald-50 to-sky-50 border-b px-6 py-4 flex flex-wrap items-center justify-between gap-3 sticky top-0 z-10">
-<div><h2 id="ttl" class="text-xl font-extrabold">Portfolio Dashboard</h2><p class="text-xs text-slate-500">Live interconnected hub — only Approved items count</p></div>
+<div><h2 id="ttl" class="text-xl font-extrabold">Portfolio Dashboard</h2><p class="text-xs text-slate-500">Central library for brand assets and documents</p></div>
 <div class="flex gap-2 items-center"><select id="bsw" class="np text-xs border rounded-xl px-2 py-2 font-semibold bg-white"></select><button onclick="openS()" class="np text-xs border rounded-xl px-3 py-2 bg-white font-semibold">🔍 Ctrl+K</button><button onclick="dark()" class="np text-xs border rounded-xl px-3 py-2 bg-white" title="Dark / Light">🌓</button><span id="sync" class="text-[11px] px-2 py-1 rounded-lg bg-slate-100 text-slate-500">…</span><span class="text-xs bg-slate-100 border rounded-xl px-3 py-2 font-bold">👤 <span id="ub">…</span></span><button onclick="logout()" class="text-xs border rounded-xl px-3 py-2">Logout</button><button onclick="exportXlsx()" class="bg-sky-600 text-white text-xs font-semibold px-3 py-2 rounded-xl">⬇ Export to Excel</button>
 <button onclick="addBrand()" class="wr bg-slate-900 text-white text-xs font-semibold px-3 py-2 rounded-xl">+ Brand</button>
 <button onclick="addRow()" class="wr bg-violet-600 text-white text-xs font-semibold px-3 py-2 rounded-xl">+ Add Row</button></div>
@@ -218,9 +218,9 @@ function addField(){form('Add Field',[['field','Field',''],['def','Definition','
 let user=null,token=null,canW=false,lastJ={},tm=null,busy={},poll=null,KEYS=['portfolio'].concat(SEC.map(s=>s[0]));
 const getV=k=>D[k],setSync=t=>{const e=$('sync');if(e)e.textContent=t};
 function toast(m){setSync('⚠ '+m);setTimeout(()=>setSync(canW?'Live ✓':'Offline'),3500)}
-async function api(path,o={}){const r=await fetch(path,Object.assign({headers:{'Content-Type':'application/json',Authorization:'Bearer '+token}},o));if(r.status===401){logout();throw new Error('auth')}if(!r.ok)throw new Error('http '+r.status);return r.json()}
+async function api(path,o={}){const r=await fetch(path,Object.assign({headers:{'Content-Type':'application/json',Authorization:'Bearer '+token}},o));if(r.status===401){logout();throw new Error('auth')}if(!r.ok){let m='';try{m=(await r.json()).detail||''}catch(e){}throw new Error('http '+r.status+(m?': '+m:''))}return r.json()}
 function persist(){if(!canW)return;clearTimeout(tm);tm=setTimeout(flush,500)}
-async function flush(){for(const k of KEYS){const j=JSON.stringify(getV(k));if(lastJ[k]===j||busy[k])continue;busy[k]=1;try{const res=await api('/api/data',{method:'PUT',body:JSON.stringify({key:k,value:getV(k)})});if(res.value!==undefined){D[k]=res.value;lastJ[k]=JSON.stringify(res.value);render()}else lastJ[k]=j;setSync('Saved ✓')}catch(e){setSync('Save failed')}busy[k]=0}}
+async function flush(){for(const k of KEYS){const j=JSON.stringify(getV(k));if(lastJ[k]===j||busy[k])continue;busy[k]=1;try{const res=await api('/api/data',{method:'PUT',body:JSON.stringify({key:k,value:getV(k)})});if(res.value!==undefined){D[k]=res.value;lastJ[k]=JSON.stringify(res.value);render()}else lastJ[k]=j;setSync('Saved ✓')}catch(e){setSync('Save failed ('+(e.message||'error')+')')}busy[k]=0}}
 function editing(){const a=document.activeElement;return $('dlg').open||(a&&(a.tagName==='INPUT'||a.tagName==='SELECT'||a.isContentEditable))}
 async function load(first){try{const res=await api('/api/data'),d=res.data||{};let ch=false;
 for(const k of KEYS){if(d[k]!==undefined&&d[k]!==null){const j=JSON.stringify(d[k]);if(first||(JSON.stringify(getV(k))===lastJ[k]&&j!==lastJ[k])){D[k]=d[k];lastJ[k]=j;ch=true}}else if(first){lastJ[k]=undefined}}
