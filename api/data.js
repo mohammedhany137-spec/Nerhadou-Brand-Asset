@@ -1,9 +1,8 @@
-const { KEYS, APPROVAL, PENDING, authUser, redis } = require('../lib/core');
-
-const rk = k => 'assetlib:' + k;
+const { appCfg, PENDING, authUser, redis } = require('../lib/core');
 
 module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
+  const A = appCfg(req), KEYS = A.keys, APPROVAL = A.approval, rk = k => A.prefix + k;
   let me;
   try { me = authUser(req); } catch (e) { return res.status(500).json({ error: 'server not configured' }); }
   if (!me) return res.status(401).json({ error: 'unauthorized' });
@@ -46,8 +45,8 @@ module.exports = async (req, res) => {
           out.forEach(r => { nm[r.id] = r; const p = pm[r.id]; if (!p) ev.push(['added', r]); else if (JSON.stringify(p) !== JSON.stringify(r)) ev.push([p.status !== r.status ? 'status: ' + r.status : 'edited', r]); });
           prevArr.forEach(r => { if (!nm[r.id]) ev.push(['deleted', r]); });
           if (ev.length) {
-            await redis(['LPUSH', 'assetlib:audit', ...ev.slice(0, 20).map(([a, r]) => JSON.stringify({ t: Date.now(), u: me.e, k: key, a, l: L(r), b: r.brand || '' }))]);
-            await redis(['LTRIM', 'assetlib:audit', 0, 499]);
+            await redis(['LPUSH', A.prefix + 'audit', ...ev.slice(0, 20).map(([a, r]) => JSON.stringify({ t: Date.now(), u: me.e, k: key, a, l: L(r), b: r.brand || '' }))]);
+            await redis(['LTRIM', A.prefix + 'audit', 0, 499]);
           }
         }
       } catch (e) {}
