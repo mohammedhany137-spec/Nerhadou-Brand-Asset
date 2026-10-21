@@ -17,7 +17,8 @@ module.exports = async (req, res) => {
       const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
       const { key, value } = body;
       if (!KEYS.includes(key)) return res.status(400).json({ error: 'bad key' });
-      if (key === 'matrices' ? (typeof value !== 'object' || Array.isArray(value) || !value) : !Array.isArray(value))
+      if (A.admin.includes(key) && me.r !== 'admin') return res.status(403).json({ error: 'only the Marketing Director/Manager can change this' });
+      if (A.objects.includes(key) ? (typeof value !== 'object' || Array.isArray(value) || !value) : !Array.isArray(value))
         return res.status(400).json({ error: 'bad value' });
       const prevRaw = await redis(['GET', rk(key)]);
       let prevArr = [];
