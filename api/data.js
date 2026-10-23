@@ -10,7 +10,7 @@ module.exports = async (req, res) => {
     if (req.method === 'GET') {
       const vals = await redis(['MGET', ...KEYS.map(rk)]);
       const data = {};
-      KEYS.forEach((k, i) => { if (vals[i]) data[k] = JSON.parse(vals[i]); });
+      KEYS.forEach((k, i) => { if (vals[i] && !(A.adminRead && A.adminRead.includes(k) && me.r !== 'admin')) data[k] = JSON.parse(vals[i]); });
       return res.status(200).json({ data, role: me.r });
     }
     if (req.method === 'PUT') {
