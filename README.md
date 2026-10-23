@@ -1,15 +1,16 @@
-# Nerhadou Asset (one app, one sidebar)
-Brand Asset: dashboard, brands, matrix, Pipelines, 10 file sections (link-only, Google Drive direct links).
-Tracking System: tracking dashboard, approvals center, Target (year selector, target vs achievement, history import), Sales Tracking, Budget Tracking, Digital Tracking, On-Ground Tracking, Campaign Calendar.
-Conferences & Expenses: conference dashboard, conferences, conference shares, expenses dashboard, expenses.
-System: alerts, audit log.
+# Nerhadou Marketing Hub (one app, one sidebar)
+Designed by Nerhadou Marketing Team · Developed by Mohamed Hany
 
-How the data is linked (one source of truth)
-- Expenses is the only place money is stored. Budget Tracking = planned lines (brand x line) with Actual computed from Expenses. Digital Tracking = Expenses of line "Digital marketing" (+ reach/engagement/CTR/leads). On-Ground Tracking = Expenses of Events / Conferences / Abroad Events (+ attendance, samples, region). Adding a row in any of them creates the same expense, so nothing is entered twice or lost.
-- An expense can be linked to a Campaign (Campaign Calendar shows actual cost per campaign). Deleting a campaign unlinks its expenses, it never deletes them.
-- Conferences are split across products by Conference Shares (per specialty). A new conference only needs its specialty and cost.
-- Renaming a brand updates every table. Deleting a brand asks for confirmation and lists what will be removed.
+Sidebar: Brand Asset (dashboard, brands, matrix, Pipelines*, 10 file sections - link-only) · Tracking System (dashboard, approvals center, Target, Sales, Budget, Digital, On-Ground, Campaign Calendar) · Conferences & Expenses (conference dashboard, conferences, events, conference shares, expenses dashboard, expenses) · System (Alerts*, Audit Log*).
+* Director/Manager (admin) only. The server does not even send Pipelines to other users.
 
-Fast entry: Quick add bar (Enter to add, remembers brand/line/month), edit numbers directly in the tables, paste rows from Excel, Excel import with templates.
-Permissions: only the Marketing Director/Manager (admin) can add/edit/delete brands, Pipelines and Conference Shares. Product Managers' rows go through approval.
-First Admin login after deploy loads the Excel data (seed v3) once; rows you added or edited yourself are kept. No file upload and no Blob store are needed anymore.
+Linking (one source of truth = Expenses)
+- Budget Tracking: planned lines; open a line to see every item (date, month, quarter, what exactly was done, cost). Filters: month, quarter, line, status, search.
+- Digital / On-Ground Tracking are views of Expenses. Every expense needs "what exactly was done".
+- Conferences and Events: a new/edited item is posted automatically to Budget Tracking (lines "Conferences" / "Events") per product by the specialty split (Conference Shares). "⚖" sets a different split for one item by selecting products and %. Auto lines are marked AUTO and follow the item's approval status. Existing Excel conferences are NOT re-posted (their budget is already in the Expenses sheets).
+- Quarters are calculated from the date everywhere (Jan-Mar = Q1 ...).
+
+Other
+- Tables: sticky header, totals row, quarter/line filters, Export, Quick add, Paste from Excel, inline editing.
+- api/upload.js and @vercel/blob are kept (the UI uses direct links).
+- First Admin login after deploy loads seed v4 once; rows you added or edited are kept.
