@@ -23,6 +23,7 @@ module.exports = async (req, res) => {
       const prevRaw = await redis(['GET', rk(key)]);
       let prevArr = [];
       try { const pj = prevRaw ? JSON.parse(prevRaw) : []; if (Array.isArray(pj)) prevArr = pj; } catch (e) {}
+      if (Array.isArray(value) && value.length === 0 && prevArr.length > 0 && !body.known) return res.status(409).json({ error: 'refused', detail: 'an empty list would erase existing data; reload the page' });
       let out = value, changed = false;
       if (me.r !== 'admin' && APPROVAL.includes(key)) {
         const prev = {};
