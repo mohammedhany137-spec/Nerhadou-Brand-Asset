@@ -14,3 +14,10 @@ Other
 - Tables: sticky header, totals row, quarter/line filters, Export, Quick add, Paste from Excel, inline editing.
 - api/upload.js and @vercel/blob are kept (the UI uses direct links).
 - First Admin login after deploy loads seed v4 once; rows you added or edited are kept.
+
+v5 notes
+- Table headers float at the top of the screen while you scroll the page (and follow horizontal scroll).
+- File sections: link by link (Quick add bar, Enter to add). No bulk paste, no file chooser. api/upload.js is kept but unused.
+- "Owner" is now "Product Manager". GM % removed. Events types: RTD, CME, Symposium, Workshop, Webinar, Consumer, Other.
+- Safety: the app never saves before the first successful load; the server refuses to replace existing data with an empty list; load errors show a red banner with the exact reason and a Retry button; polling is every 2 minutes (and when you return to the tab) to save Redis requests.
+- Director tools (🛠): download a full backup, restore a backup, reload the Excel data.
