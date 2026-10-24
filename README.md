@@ -1,7 +1,7 @@
 # Nerhadou Marketing Hub (one app, one sidebar)
 Designed by Nerhadou Marketing Team · Developed by Mohamed Hany
 
-Sidebar: Dashboards (Brand Asset, Tracking, Conference and Expenses dashboards) · Brand Asset (brands, matrix, Pipelines*, 10 file sections) · Tracking System (Approvals, Sales, Target, Budget, Digital, On-Ground and Conference Share trackers) · Editable Inputs (Sales Entry, Expenses, Conferences, Events and Campaigns) · System (Alerts*, Audit Log*).
+Sidebar: Dashboards (Brand Asset, Tracking, Conference and Expenses dashboards) · Brand Asset (brands, matrix, Pipelines*, 10 file sections) · Tracking System (Approvals, Sales Tracker, Targets, Budget Tracker, Digital Tracker, On-Ground Tracker and Conference Shares) · Editable Inputs (Sales Entry, Expenses, Conferences, Events and Campaigns) · System (Alerts*, Audit Log*).
 * Director/Manager (admin) only. The server does not even send Pipelines to other users.
 
 Linking (one source of truth = Expenses)
