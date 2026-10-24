@@ -1,7 +1,7 @@
 # Nerhadou Marketing Hub (one app, one sidebar)
 Designed by Nerhadou Marketing Team · Developed by Mohamed Hany
 
-Sidebar: Brand Asset (dashboard, brands, matrix, Pipelines*, 10 file sections - link-only) · Tracking System (dashboard, approvals center, Budget, Digital, On-Ground, Campaign Calendar) · Editable Inputs (Sales Entry, Targets, conferences, events, conference shares, expenses dashboards and expenses) · System (Alerts*, Audit Log*).
+Sidebar: Brand Asset (dashboard, brands, matrix, Pipelines*, 10 file sections - link-only) · Tracking System (dashboard, approvals center, Sales Tracking, Targets, Budget, Digital, On-Ground) · Editable Inputs (Sales Entry, conferences, events and campaigns, conference shares, expenses dashboards and expenses) · System (Alerts*, Audit Log*).
 * Director/Manager (admin) only. The server does not even send Pipelines to other users.
 
 Linking (one source of truth = Expenses)
@@ -28,3 +28,7 @@ V9 requested refinements
 - Budget, Digital and On-Ground tracking pages are read-only; edits belong in the source entry pages.
 - Events capture a selected activity and itemized cost components; product split can be customized by selecting products and allocation percentages. Event allocations post to Budget and Expenses automatically.
 - Target field labels now say In-market units.
+
+- Sales Tracking is read-only; data entry is in Sales Entry. Actual inputs are units and unit price (XF); target units are pulled from the admin-owned annual Targets and values calculate as units × price.
+- Targets are read-only to contributors; admins can add and edit targets by year.
+- The standalone Campaign Calendar tab is removed. The Events and Campaigns page combines the calendar, campaigns and events; events may link to a campaign and their costs flow to Budget and Expenses.
