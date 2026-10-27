@@ -49,6 +49,27 @@ Every open page asks for `/api/version` — an **11-byte** number — every **90
 (and when the tab becomes visible again). The data itself is downloaded **only when that
 number changed**, so the free Redis quota is not burned by polling.
 
+### IQVIA market page (`data/iqvia.json`)
+A new sidebar page **IQVIA Market (Egypt)**: pick any of the 516 ATC4 markets (type to search),
+then choose the periods you want (2022, 2023, 2024, 2025, YTD 2025/2026, MAT 2025/2026) and the
+metric (LC Value or Units). It shows market size, the company's sales, **MS%**, **Gr% year over
+year**, **Δ share (pp)** and a **3-year CAGR (2022 → 2025)**, plus the top companies and
+Nerhadou's products inside that market and two charts.
+
+- `data/iqvia.json` holds 2022–2025 (static, from *Total IMS*) and the YTD/MAT block
+  (from the latest *IQVIA* sheet, currently **Aug 2026**).
+- To refresh the YTD/MAT part, replace `data/iqvia.json` with a newly built file — nothing else
+  changes, and the 2022–2025 numbers stay as they are.
+
+### Brand → product manager
+**Brand Asset → Brands** now has a *Product manager* column. An admin can:
+- choose the responsible PM while creating a brand (`+ Add Brand`), or
+- press ✏️ next to any brand to move it to another PM.
+
+The assignment is stored in Redis (`assetlib:assign`) and wins over `lib/team.js`: it is applied
+at login, in the data scope of every request and on the *My Team* page — so a moved brand is
+added to the new PM and removed from the old one immediately.
+
 ### Module IDs and the review register
 Every page has a fixed id (`MOD-DOC-03`, `MOD-TRK-03`, …) shown next to the page title, and
 every record has a short reference (`TRK-4F2A9C`) listed in **System → Modules** (admins).
@@ -69,7 +90,7 @@ Other
 - First Admin login after deploy loads seed v4 once; rows you added or edited are kept.
 
 ## Deploy
-1. Upload `index.html`, `api/`, `lib/`, `package.json`, `vercel.json` to the repo (Vercel redeploys by itself).
+1. Upload `index.html`, `api/`, `lib/`, `data/`, `package.json`, `vercel.json` to the repo (Vercel redeploys by itself).
 2. Vercel → Settings → Environment Variables (nothing has to be deleted):
 
 | Variable | Status |
