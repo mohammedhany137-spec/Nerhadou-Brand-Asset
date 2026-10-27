@@ -51,15 +51,21 @@ number changed**, so the free Redis quota is not burned by polling.
 
 ### IQVIA market page (`data/iqvia.json`)
 A new sidebar page **IQVIA Market (Egypt)**: pick any of the 516 ATC4 markets (type to search),
-then choose the periods you want (2022, 2023, 2024, 2025, YTD 2025/2026, MAT 2025/2026) and the
-metric (LC Value or Units). It shows market size, the company's sales, **MS%**, **Gr% year over
-year**, **Δ share (pp)** and a **3-year CAGR (2022 → 2025)**, plus the top companies and
-Nerhadou's products inside that market and two charts.
+then choose the periods you want (2022, 2023, 2024, 2025, **YTD Aug 2025/2026**, **MAT Aug 2025/2026**)
+and the metric (LC Value or Units). It shows market size, the company's sales, **MS%**, **Gr%
+year over year**, **Δ share (pp)** and a **3-year CAGR (2022 → 2025)**, plus the top companies
+and two charts.
 
-- `data/iqvia.json` holds 2022–2025 (static, from *Total IMS*) and the YTD/MAT block
-  (from the latest *IQVIA* sheet, currently **Aug 2026**).
-- To refresh the YTD/MAT part, replace `data/iqvia.json` with a newly built file — nothing else
-  changes, and the 2022–2025 numbers stay as they are.
+Under it, **Products in this market** lists every product of the ATC4 (10,311 products in total):
+product, company, units, LC value, **MS%** and **Gr%** for any period you pick, with a search box;
+Nerhadou products are highlighted.
+
+- `data/iqvia.json` (206 KB) = ATC4 totals: 2022–2025 (static, from *Total IMS*) + the YTD/MAT
+  block from the latest *IQVIA* sheet (**Aug 2026**).
+- `data/iqvia_products.json` (1.1 MB) = the product detail for the same periods; it is fetched
+  only when the IQVIA page is opened.
+- To refresh the YTD/MAT part, replace both files with newly built ones — nothing else changes,
+  and the 2022–2025 numbers stay as they are.
 
 ### Brand → product manager
 **Brand Asset → Brands** now has a *Product manager* column. An admin can:
