@@ -1,5 +1,5 @@
-const { authUser } = require('../lib/core');
-const { findUser, teamFor, teams } = require('../lib/team');
+const { authUser, appCfg, getAssign } = require('../lib/core');
+const { findUser, teamFor, teams, brandsFor } = require('../lib/team');
 
 /* Team of the signed-in GPM (admins: every team). PMs get 403. */
 module.exports = async (req, res) => {
@@ -9,13 +9,14 @@ module.exports = async (req, res) => {
   if (!me) return res.status(401).json({ error: 'unauthorized' });
   if (me.r === 'pm') return res.status(403).json({ error: 'forbidden' });
   const all = teams();
+  const assign = await getAssign(appCfg(req).prefix);
   const keys = me.r === 'admin' ? Object.keys(all) : [ (findUser(me.e) || {}).team ].filter(Boolean);
   const out = keys.map(k => {
     const t = teamFor(k);
     return {
       name: t.name,
       gpm: t.gpm,
-      members: t.members.map(p => ({ email: p.email, name: p.name, role: p.role, brands: p.brands || [] }))
+      members: t.members.map(p => ({ email: p.email, name: p.name, role: p.role, brands: brandsFor({ email: p.email, role: p.role, brands: p.brands || [], team: p.team || '' }, assign) || [] }))
     };
   });
   res.status(200).json({ teams: out });

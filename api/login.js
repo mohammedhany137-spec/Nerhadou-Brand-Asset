@@ -1,4 +1,4 @@
-const { sign, checkPassword, isDefaultPassword, redis, appCfg } = require('../lib/core');
+const { sign, checkPassword, isDefaultPassword, redis, appCfg, getAssign } = require('../lib/core');
 const { findUser, brandsFor, normBrand } = require('../lib/team');
 
 /*
@@ -43,7 +43,7 @@ module.exports = async (req, res) => {
   try { ok = await checkPassword(email, password); } catch (e) { return res.status(500).json({ error: 'server not configured' }); }
   if (!ok) return fail();
 
-  const brands = await canonicalBrands(req, brandsFor(u) || []);
+  const brands = await canonicalBrands(req, brandsFor(u, await getAssign(appCfg(req).prefix)) || []);
   const user = {
     email: u.email,
     name: u.name,

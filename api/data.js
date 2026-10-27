@@ -1,4 +1,4 @@
-const { appCfg, PENDING, authUser, redis, revString, bumpRev } = require('../lib/core');
+const { appCfg, PENDING, authUser, redis, revString, bumpRev, getAssign } = require('../lib/core');
 const { brandsFor, normBrand } = require('../lib/team');
 const { specIndex, filterValue, mergeValue } = require('../lib/scope');
 
@@ -13,7 +13,7 @@ module.exports = async (req, res) => {
      product change takes effect immediately instead of at the next login. */
   let scope = null;
   try {
-    const brands = brandsFor({ email: me.e, role: me.r, brands: me.b || [], team: me.tm || '' });
+    const brands = brandsFor({ email: me.e, role: me.r, brands: me.b || [], team: me.tm || '' }, await getAssign(A.prefix));
     scope = brands === null ? null : new Set(brands.map(normBrand).filter(Boolean));
     if (scope && !scope.size) scope = new Set(['\u0000none']); // no products -> sees nothing
   } catch (e) { scope = null; }
