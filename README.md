@@ -84,6 +84,10 @@ added to the new PM and removed from the old one immediately.
   total, Budget Tracking and Expenses as before.
 - New **City** field (27 Egyptian governorates) and three extra filters on the Conferences page:
   **doctor name**, **organizer** and **city**.
+- Every conference row also has a **👥 button**: a fast doctor editor with two big boxes
+  (registered / accommodation). Paste two columns straight from Excel (`name` + Tab + `amount`),
+  or one name per line, press **Apply to all** to give everybody the same amount, and
+  **Save doctors** — the registration/accommodation cost and the conference total update at once.
 
 ### Expenses — a cost shared between two products
 - When you add a cost (Prints, Gimmicks, a Bag…) choose **Share this cost with another product**
