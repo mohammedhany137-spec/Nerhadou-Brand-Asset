@@ -89,16 +89,37 @@ added to the new PM and removed from the old one immediately.
   or one name per line, press **Apply to all** to give everybody the same amount, and
   **Save doctors** — the registration/accommodation cost and the conference total update at once.
 
-### Expenses — a cost shared between two products
-- When you add a cost (Prints, Gimmicks, a Bag…) choose **Share this cost with another product**
-  and the **share %**. The product that entered it keeps the rest, and the other product gets the
-  cost automatically in its own Expenses (marked `AUTO`), so nobody re-enters it.
-- The receiving product manager sees a green banner **“N costs shared with your product”** on the
-  Expenses page, and if they try to enter the same item again they get an alert instead of a
-  duplicate.
-- Deleting the source item deletes the shared line too. Only **product names** are listed in the
-  picker — no other product's data is exposed.
+### Expenses — a cost split between products (⚖)
+- Every expense row has a **⚖ button**: split the cost between **as many products as you want**
+  (the owner is always in the list) and the percentages **must total 100%**.
+  Example: a Bag of 10,000 → Vitatron 60% · Octatron 30% · Zinctron 10%.
+- The owner keeps only its own part (6,000) and **each other product gets its own expense line
+  automatically** (3,000 / 1,000), marked `AUTO`, so nobody re-enters it.
+- The product manager who receives it sees a green banner **“N costs shared with your product”**
+  on the Expenses page; if they try to enter the same item again they get an alert instead of a
+  duplicate. Deleting the source item deletes all the shared lines too.
+- Only **product names** are listed in the split picker — no other product's data is exposed.
 - Every one of these entries still goes to the **GPM / Marketing Director** for approval.
+
+### Sales Entry is admin-only
+Sales Entry no longer appears for product managers or GPMs: sales are loaded by the admins from a
+sheet (Import) and everybody else keeps the read-only **Sales Tracker**. The server refuses writes
+to it for non-admins as well.
+
+### Filters everywhere
+Every dashboard and every table now sits under one filter bar:
+- **From / To month** (any range), **Specialty**, **Status**, **Year**, and the **brand switcher**
+  in the header (multi-select).
+- The filters apply to the dashboards' KPIs and charts, and to every table (they stack with each
+  table's own search / month / quarter / line filters).
+- Tables add their own filters where they make sense: conferences have **doctor name, organizer
+  and city**; expenses have **line**; sales have **month** and **status**.
+- One button **✕ Clear** resets the global filters.
+
+### IQVIA grand total
+When no ATC4 is chosen, the page opens with **Grand total — all Egypt markets (516 ATC4)**: market
+size, Nerhadou sales, **MS%**, **Gr%** and **Δ share** for every selected period, followed by the
+Nerhadou-markets table which now ends with a **Total row** as well.
 
 ### Module IDs and the review register
 Every page has a fixed id (`MOD-DOC-03`, `MOD-TRK-03`, …) shown next to the page title, and
