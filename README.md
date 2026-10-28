@@ -76,6 +76,26 @@ The assignment is stored in Redis (`assetlib:assign`) and wins over `lib/team.js
 at login, in the data scope of every request and on the *My Team* page — so a moved brand is
 added to the new PM and removed from the old one immediately.
 
+### Conferences — doctors, cities and filters
+- **Registered doctors** and **Accommodation doctors** are now real lists: each line has a **name + an
+  amount**, a live total, **“Amount for all”** (write 10,000 once and apply it to everybody), and
+  **📋 Paste from Excel** — paste 50–60 names at once (one per line, or `name<TAB>amount`).
+- The list total fills *Registration cost* / *Accommodation cost*, and those feed the conference
+  total, Budget Tracking and Expenses as before.
+- New **City** field (27 Egyptian governorates) and three extra filters on the Conferences page:
+  **doctor name**, **organizer** and **city**.
+
+### Expenses — a cost shared between two products
+- When you add a cost (Prints, Gimmicks, a Bag…) choose **Share this cost with another product**
+  and the **share %**. The product that entered it keeps the rest, and the other product gets the
+  cost automatically in its own Expenses (marked `AUTO`), so nobody re-enters it.
+- The receiving product manager sees a green banner **“N costs shared with your product”** on the
+  Expenses page, and if they try to enter the same item again they get an alert instead of a
+  duplicate.
+- Deleting the source item deletes the shared line too. Only **product names** are listed in the
+  picker — no other product's data is exposed.
+- Every one of these entries still goes to the **GPM / Marketing Director** for approval.
+
 ### Module IDs and the review register
 Every page has a fixed id (`MOD-DOC-03`, `MOD-TRK-03`, …) shown next to the page title, and
 every record has a short reference (`TRK-4F2A9C`) listed in **System → Modules** (admins).
@@ -92,7 +112,8 @@ Linking (one source of truth = Expenses)
 
 Other
 - Tables: sticky header, totals row, quarter/line filters, Export, full add/edit forms, Paste from Excel and inline editing on editable inputs.
-- api/upload.js and @vercel/blob are kept (the UI uses direct links).
+- File sections accept **an uploaded file** (Vercel Blob, up to 5 TB, no function size limit) **or** a Google Drive / any https direct link. The uploaded file shows its real size in the row.
+  For uploads to work, create a **Blob store** in Vercel (Storage → Blob) so `BLOB_READ_WRITE_TOKEN` exists; without it the upload button says so and the Drive link still works.
 - First Admin login after deploy loads seed v4 once; rows you added or edited are kept.
 
 ## Deploy
