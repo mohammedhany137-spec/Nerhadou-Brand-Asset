@@ -1,0 +1,719 @@
+'use strict';
+/* Runs the Vercel functions locally: mock req/res with the same helpers Vercel
+   provides (status/json/send/end), plus a fake Upstash endpoint in env. */
+const path = require('path');
+
+const API = p => require(path.join(__dirname, '..', 'api', p));
+
+function makeRes() {
+  const res = {
+    statusCode: 200, body: undefined, headers: {}, ended: false,
+    status(c) { res.statusCode = c; return res; },
+    setHeader(k, v) { res.headers[k] = v; return res; },
+    json(o) { res.body = o; return res; },
+    send(o) { res.body = o; return res; },
+    end(x) { if (x !== undefined) res.body = x; res.ended = true; return res; }
+  };
+  return res;
+}
+
+function call(file, { method = 'GET', body, query = {}, headers = {}, url = '/' } = {}) {
+  const req = {
+    method, headers: Object.assign({ 'content-type': 'application/json' }, headers), query,
+    body: body === undefined ? undefined : (typeof body === 'string' ? body : body),
+    url
+  };
+  const res = makeRes();
+  return API(file)(req, res).then(() => res);
+}
+
+function api(name) { return API(name + '.js'); }
+
+module.exports = { call, api };
+
+'use strict';
+/* The licensed figures and the roster are no longer public files.
+   Run: node test/private.js */
+const { start } = require('./fake-redis');
+const path = require('path');
+
+let pass = 0, failn = 0;
+const ok = (name, cond, extra) => {
+  if (cond) { pass++; console.log('  ✓ ' + name); }
+  else { failn++; console.log('  ✗ ' + name + (extra !== undefined ? '  → ' + JSON.stringify(extra) : '')); }
+};
+
+const FILES = ['../api/login.js', '../api/password.js', '../api/iqvia.js', '../api/shield.js', '../api/backup.js', '../lib/core.js', '../lib/team.js', '../lib/backup.js'];
+function freshApi() {
+  FILES.forEach(p => { delete require.cache[require.resolve(path.join(__dirname, p))]; });
+  return {
+    login: require(path.join(__dirname, '../api/login.js')),
+    password: require(path.join(__dirname, '../api/password.js')),
+    iqvia: require(path.join(__dirname, '../api/iqvia.js')),
+    shield: require(path.join(__dirname, '../api/shield.js')),
+    backup: require(path.join(__dirname, '../api/backup.js'))
+  };
+}
+function res() {
+  const r = {
+    statusCode: 200, body: undefined, headers: {},
+    status(c) { r.statusCode = c; return r; },
+    setHeader(k, v) { r.headers[k] = v; return r; },
+    json(o) { r.body = o; return r; },
+    send(o) { r.body = o; return r; },
+    end(x) { if (x !== undefined) r.body = x; return r; }
+  };
+  return r;
+}
+const hit = (fn, o) => {
+  const r = res();
+  return fn({
+    method: o.method || 'GET', query: o.query || {}, url: o.url || '/',
+    headers: Object.assign({ 'content-type': 'application/json' }, o.headers || {}),
+    body: o.body === undefined ? undefined : JSON.stringify(o.body)
+  }, r).then(() => r);
+};
+const bearer = t => ({ authorization: 'Bearer ' + t });
+const signIn = (fn, email, password) => hit(fn, { method: 'POST', body: { email, password } });
+
+let store, A, r;
+
+(async () => {
+  store = await start();
+  process.env.SESSION_SECRET = 'test-secret';
+  process.env.UPSTASH_REDIS_REST_URL = store.url;
+  process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
+  process.env.ADMIN_EMAIL_1 = 'mohamed.hany@nerhadou.com';
+  process.env.ADMIN_PASSWORD_1 = 'Nerhadou#Hub2026';
+  A = freshApi();
+
+  console.log('\n[1] the IQVIA figures need a signed-in member of the team');
+  r = await hit(A.iqvia, { query: { set: 'market' } });
+  ok('no session, no figures', r.statusCode === 401, r.body);
+  r = await hit(A.iqvia, { query: { set: 'market' }, headers: bearer('made.up.token') });
+  ok('a forged token does not work either', r.statusCode === 401, r.body);
+  const pm = (await signIn(A.login, 'feby_abdallah@nerhadou.com', '123456')).body.token;
+  r = await hit(A.iqvia, { query: { set: 'market' }, headers: bearer(pm) });
+  ok('a product manager gets the market table', r.statusCode === 200 && !!(r.body && r.body.atc), r.statusCode);
+  r = await hit(A.iqvia, { query: { set: 'products' }, headers: bearer(pm) });
+  ok('and the product detail', r.statusCode === 200 && !!(r.body && r.body.atc), r.statusCode);
+  r = await hit(A.iqvia, { query: { set: '../../etc/passwd' }, headers: bearer(pm) });
+  ok('only the two known files can be asked for', r.statusCode === 400, r.body);
+  r = await hit(A.iqvia, { headers: bearer(pm) });
+  ok('with no name at all it refuses', r.statusCode === 400, r.body);
+
+  console.log('\n[2] an admin still on his first password gets nothing');
+  const adminFirst = (await signIn(A.login, 'mohamed.hany@nerhadou.com', 'Nerhadou#Hub2026')).body.token;
+  r = await hit(A.iqvia, { query: { set: 'market' }, headers: bearer(adminFirst) });
+  ok('the licensed data waits for the password change', r.statusCode === 403 && r.body.error === 'password_change_required', r.body);
+
+  console.log('\n[3] the folder shield');
+  r = await hit(A.shield, { url: '/api/shield' });
+  ok('anything rewritten here answers 404', r.statusCode === 404, r.body);
+  const cfg = require(path.join(__dirname, '..', 'vercel.json'));
+  const src = (cfg.rewrites || []).map(x => x.source);
+  ok('vercel.json shadows /data/*', src.indexOf('/data/:path*') >= 0, src);
+  ok('and /lib/*', src.indexOf('/lib/:path*') >= 0, src);
+  const dest = cfg.rewrites.map(x => x.destination);
+  ok('both go to the shield function', dest.every(d => d === '/api/shield'), dest);
+  const html = require('fs').readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  ok('the page no longer fetches anything from /data', !/["']\/data\//.test(html), null);
+  ok('and never loads a file from /lib', !/["'\(]\/lib\//.test(html), null);
+
+  console.log('\n[4] the backup');
+  store.kv.set('assetlib:portfolio', JSON.stringify([{ id: 1, brand: 'Vitatron' }]));
+  store.kv.set('assetlib:specshare', JSON.stringify([{ id: 10, spec: 'Diabetes', prod: 'Vitatron', pct: 100 }]));
+  store.kv.set('assetlib:docs', JSON.stringify({ 800: { registeredDoctors: ['Dr Farid'], registeredDoctorsAmt: [5000] } }));
+  store.kv.set('assetlib:assign', JSON.stringify({ 'Vitatron': 'someone@nerhadou.com' }));
+  r = await hit(A.backup, { headers: bearer(pm) });
+  ok('a product manager cannot download the whole database', r.statusCode === 403, r.body);
+  const first = (await signIn(A.login, 'mohamed.hany@nerhadou.com', 'Nerhadou#Hub2026')).body.token;
+  const changed = await hit(A.password, { method: 'POST', headers: bearer(first), body: { current: 'Nerhadou#Hub2026', next: 'Director#Own1' } });
+  const boss = changed.body.token;
+  r = await hit(A.backup, { headers: bearer(boss) });
+  const snap = typeof r.body === 'string' ? JSON.parse(r.body) : r.body;
+  ok('the Director gets a snapshot', r.statusCode === 200 && !!snap && !!snap.portfolio, r.statusCode);
+  ok('the browser is told to save it as a file', /attachment; filename="nerhadou_backup_\d{4}-\d{2}-\d{2}\.json"/.test(r.headers['Content-Disposition'] || ''), r.headers);
+  ok('it holds the tables that are stored', !!snap.portfolio && !!snap.specshare, Object.keys(snap || {}));
+  ok('the doctor lists are in it', !!(snap.docs && snap.docs['800']), Object.keys(snap || {}));
+  ok('and the brand assignments', !!(snap.assign && snap.assign.Vitatron), null);
+  ok('but not the password hashes', !snap.$passwords, null);
+
+  console.log('\n[5] the nightly copy');
+  r = await hit(A.backup, { method: 'POST' });
+  ok('a call with no key at all is refused', r.statusCode === 401, r.body);
+  process.env.CRON_SECRET = 'cron-test-secret';
+  r = await hit(A.backup, { method: 'POST', headers: { authorization: 'Bearer guess-me' } });
+  ok('a wrong cron secret is refused', r.statusCode === 401, r.body);
+  r = await hit(A.backup, { method: 'POST', headers: { authorization: 'Bearer cron-test-secret' } });
+  ok('the right one reaches the storage step', r.statusCode === 500 && r.body.error === 'backup failed', r.body);
+  const vault = require(path.join(__dirname, '../lib/backup.js'));
+  const sealed = vault.encrypt(JSON.stringify(snap));
+  ok('the copy is not readable plain text', sealed.indexOf(Buffer.from('mohamed.hany@nerhadou.com')) < 0, null);
+  ok('and opens again with the same secret', JSON.parse(vault.decrypt(sealed)).docs['800'].registeredDoctors[0] === 'Dr Farid', null);
+  process.env.SESSION_SECRET = 'another-secret';
+  let opened = '';
+  try { opened = vault.decrypt(sealed); } catch (e) { opened = ''; }
+  ok('a copy sealed with an old secret does not open', opened === '', null);
+  process.env.SESSION_SECRET = 'test-secret';
+
+  console.log('\n' + pass + ' passed, ' + failn + ' failed');
+  await store.shutdown();
+  process.exit(failn ? 1 : 0);
+})().catch(e => { console.error(e); process.exit(2); });
+
+'use strict';
+/* The page paints its tables with template strings, so every value that a product manager
+   can type has to be escaped where it is written into HTML. This suite runs the four helpers
+   with the payloads the reviewer asked about, then reads index.html and vercel.json to check
+   that the helpers are actually used at the sinks.
+   Run: node test/xss.js */
+const fs = require('fs');
+const path = require('path');
+
+const PAGE = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+let pass = 0, failn = 0;
+const ok = (name, cond, extra) => {
+  if (cond) { pass++; console.log('  ✓ ' + name); }
+  else { failn++; console.log('  ✗ ' + name + (extra !== undefined ? '  → ' + JSON.stringify(extra) : '')); }
+};
+const at = re => { const m = PAGE.match(re); return m ? m[0] : ''; };
+const uses = (needle, name) => ok(name, PAGE.indexOf(needle) >= 0, needle);
+
+/* ---- [1] the helpers themselves, taken from the page ---- */
+console.log('[1] escaping helpers');
+const defs = ['ESC', 'ATTR', 'HREF', 'xg'].map(n => {
+  const line = PAGE.split('\n').find(l => l.startsWith('var ' + n + '='));
+  if (!line) throw new Error(n + ' is not defined at the top of the page');
+  return line.replace(/^var /, 'let ');
+});
+const box = new Function(defs.join('\n') + '\nreturn {ESC,ATTR,HREF,xg};')();
+const { ESC, ATTR, HREF, xg } = box;
+
+const HTMLY = '<img src=x onerror=alert(1)>';
+ok('ESC hides a tag', !ESC(HTMLY).includes('<') && ESC(HTMLY).includes('&lt;img'), ESC(HTMLY));
+ok('ESC hides a quote in a value', !ESC('a"b').includes('"'), ESC('a"b'));
+ok('ESC hides a single quote', ESC("d'or").includes('&#39;'), ESC("d'or"));
+
+/* The attack the reviewer described: a file titled  x');alert(1);//  reaches
+   onclick="edit('files','x');alert(1);//',1)". HTML escaping alone is not enough,
+   because the browser decodes the entities before it compiles the handler. */
+const PAYLOAD = "x');alert(1);//";
+const handler = 'onclick="edit(\'' + ATTR(PAYLOAD) + '\',1)"';
+ok('ATTR keeps the handler one call', (handler.match(/'\)/g) || []).length === 1, handler);
+ok('ATTR keeps the letters', ATTR(PAYLOAD).includes("x\\'") && ATTR(PAYLOAD).includes('alert(1);//'), ATTR(PAYLOAD));
+ok('ATTR cannot leave a bare quote', !/'/.test(ATTR(PAYLOAD).replace(/\\'/g, '')), ATTR(PAYLOAD));
+ok('ATTR doubles a backslash', ATTR('a\\b') === 'a\\\\b', ATTR('a\\b'));
+
+ok('HREF keeps a drive link', HREF('https://drive.google.com/file/d/1/view').includes('https://drive'));
+ok('HREF keeps a site path', HREF('/api/backup').includes('/api/backup'));
+ok('HREF kills javascript:', HREF('javascript:alert(1)') === '#', HREF('javascript:alert(1)'));
+ok('HREF kills a spaced JAVASCRIPT:', HREF('  JaVaScRiPt:alert(1)') === '#');
+ok('HREF kills data:text/html', HREF('data:text/html,<script>alert(1)</script>') === '#');
+ok('HREF kills a quote break out', !/"/.test(HREF('a" onmouseover="alert(1)')), HREF('a" onmouseover="alert(1)'));
+
+ok('xg neuters a formula title', xg('=HYPERLINK("http://evil","click")').charCodeAt(0) === 0x200B, xg('=1+1'));
+ok('xg neuters + - @', [xg('+1'), xg('-1'), xg('@SUM(A1)')].every(v => v.charCodeAt(0) === 0x200B));
+ok('xg leaves a number alone', xg(1234) === 1234);
+ok('xg leaves plain text alone', xg('Leaflet v2') === 'Leaflet v2');
+
+/* ---- [2] the ten file sections ---- */
+console.log('[2] the file sections');
+const cols = at(/c:\[\['Date',r=>ESC\(r\.date\)[^\n]*'Remarks'[^\n]*\]\]/);
+['Date', 'Brand', 'Title', 'Type', 'Version', 'Product Manager', 'Remarks'].forEach(f =>
+  ok('the ' + f + ' column is escaped', new RegExp("\\['" + f + "',r=>(?:`<b>\\$\\{)?ESC\\(").test(cols), cols.slice(0, 120)));
+uses('const fcol=r=>r.link?`<a href="${HREF(r.link)}"', 'the file link goes through HREF');
+uses('${ESC(r.fname||\'Open file\')}', 'the file name is escaped');
+ok('no raw href from a stored link', !/href="\$\{r\.link\}"/.test(PAGE) && !/href="\$\{ESC\(r\.link\)\}"/.test(PAGE));
+
+/* ---- [3] the other places a name is painted ---- */
+console.log('[3] the rest of the page');
+uses('<h3 class="font-bold">${ESC(title)}</h3>', 'the dialog title is escaped');
+uses('value="${ESC(f.q)}"', 'the table search box is escaped');
+uses('value="${ESC(r.notes||\'\')}"', 'the approver notes box is escaped');
+['ESC(e.u)', 'ESC(e.a)', 'ESC(e.l', 'ESC(e.b'].forEach(s => uses(s, 'the audit log cell ' + s + ' is escaped'));
+uses('<b>${ESC(lab(r))}</b>', 'the approvals list label is escaped');
+uses('${ESC(r.notes)}</div>', 'the approvals note is escaped');
+uses('${ESC(lab(r))} · status timeline', 'the status timeline title is escaped');
+uses('<b>${ESC(e.a)}</b> <span class="text-slate-500">${ESC(e.u)}', 'the history entry is escaped');
+uses('${ESC(x[1])}</b> <span class="text-slate-500">${ESC(x[2])}', 'the global search result is escaped');
+uses('onclick="bf=\'${ATTR(p.brand)}\';go(', 'the dashboard cell handler quotes the brand with ATTR');
+uses('${ESC(p.brand)}</td>${SEC.map', 'the coverage table escapes the brand');
+uses('<b>${ESC(r.name)}</b> <span class="text-slate-500">${ESC(r.brand)} · ', 'the recent uploads box escapes the file');
+uses('${ESC(b)} · Monthly Report', 'the monthly report title escapes the brand');
+uses('<td class="p-1.5">${ESC(lab(r))}</td>', 'the monthly report rows escape the item');
+
+/* ---- [4] the Excel exports ---- */
+console.log('[4] exports');
+const exp = at(/function expTbl\(\)[^\n]*/);
+ok('expTbl guards every cell', (exp.match(/xg\(/g) || []).length >= 3, exp.slice(0, 200));
+const all = at(/async function exportXlsx\(\)[\s\S]{0,1400}/);
+ok('exportXlsx guards the asset columns', /xg\(typeof c\[1\]==='function'/.test(all));
+ok('exportXlsx guards the tracker rows', (all.match(/xg\(/g) || []).length >= 5, (all.match(/xg\(/g) || []).length);
+
+/* ---- [5] what the browser is told ---- */
+console.log('[5] response headers');
+const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, '../vercel.json'), 'utf8'));
+const hdrs = [].concat(...cfg.headers.map(h => h.headers));
+const csp = (hdrs.find(h => h.key === 'Content-Security-Policy') || {}).value || '';
+ok('a CSP is sent', csp.length > 60, csp.slice(0, 60));
+ok('the CSP blocks everything by default', csp.includes("default-src 'self'"));
+ok('the CSP still allows the CDNs the page loads', ['cdn.tailwindcss.com', 'cdnjs.cloudflare.com', 'esm.sh', 'fonts.googleapis.com', 'fonts.gstatic.com'].every(h => csp.includes(h)), csp);
+ok('the CSP allows the blob upload PUT', csp.includes('vercel-storage.com'));
+ok('the CSP pins frames, objects and forms', ["frame-ancestors 'self'", "object-src 'none'", "base-uri 'self'", "form-action 'self'"].every(d => csp.includes(d)));
+ok('no third-party script tag outside the allowed hosts',
+  (PAGE.match(/src="(https?:\/\/[^"]+)"/g) || []).every(s => ['cdn.tailwindcss.com', 'cdnjs.cloudflare.com', 'esm.sh'].some(h => s.includes(h))),
+  (PAGE.match(/src="(https?:\/\/[^"]+)"/g) || []));
+
+console.log('\n' + pass + ' passed, ' + failn + ' failed');
+process.exitCode = failn ? 1 : 0;
+
+'use strict';
+/* Sign-in and password rules. Run: node test/auth.js */
+const { start } = require('./fake-redis');
+const path = require('path');
+
+let pass = 0, fail = 0;
+const ok = (name, cond, extra) => {
+  if (cond) { pass++; console.log('  ✓ ' + name); }
+  else { fail++; console.log('  ✗ ' + name + (extra !== undefined ? '  → ' + JSON.stringify(extra) : '')); }
+};
+
+const FILES = ['../api/login.js', '../api/password.js', '../api/data.js', '../lib/core.js', '../lib/team.js', '../lib/scope.js'];
+function freshApi() {
+  FILES.forEach(p => { delete require.cache[require.resolve(path.join(__dirname, p))]; });
+  return {
+    login: require(path.join(__dirname, '../api/login.js')),
+    password: require(path.join(__dirname, '../api/password.js')),
+    data: require(path.join(__dirname, '../api/data.js'))
+  };
+}
+
+function res() {
+  const r = {
+    statusCode: 200, body: undefined, headers: {},
+    status(c) { r.statusCode = c; return r; },
+    setHeader(k, v) { r.headers[k] = v; return r; },
+    json(o) { r.body = o; return r; },
+    send(o) { r.body = o; return r; },
+    end(x) { if (x !== undefined) r.body = x; return r; }
+  };
+  return r;
+}
+const hit = (fn, { method = 'POST', body, headers = {} }) => {
+  const r = res();
+  return fn({
+    method, query: {}, url: '/',
+    headers: Object.assign({ 'content-type': 'application/json' }, headers),
+    body: body === undefined ? undefined : JSON.stringify(body)
+  }, r).then(() => r);
+};
+
+const loginWith = (fn, email, password) => hit(fn, { body: { email, password } });
+const getData = (fn, tok) => hit(fn, { method: 'GET', headers: { authorization: 'Bearer ' + tok } });
+const putData = (fn, tok, body) => hit(fn, { headers: { authorization: 'Bearer ' + tok }, body });
+const changePw = (fn, tok, current, next) => hit(fn, { headers: { authorization: 'Bearer ' + tok }, body: { current, next } });
+
+let store;
+
+(async () => {
+  store = await start();
+  process.env.SESSION_SECRET = 'test-secret';
+  process.env.UPSTASH_REDIS_REST_URL = store.url;
+  process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
+  process.env.ADMIN_EMAIL_1 = 'mohamed.hany@nerhadou.com';
+  process.env.ADMIN_PASSWORD_1 = 'Nerhadou#Hub2026';
+  process.env.ADMIN_EMAIL_2 = 'second.admin@nerhadou.com';
+  process.env.ADMIN_PASSWORD_2 = 'Second#Admin99';
+  process.env.ADMIN_EMAIL_3 = 'third.admin@nerhadou.com';
+  process.env.ADMIN_EMAILS = '';
+  process.env.ADMIN_EMAIL = '';
+
+  let A = freshApi();
+
+  console.log('\n[1] the five admin slots');
+  let r = await loginWith(A.login, 'mohamed.hany@nerhadou.com', 'Nerhadou#Hub2026');
+  ok('ADMIN_PASSWORD_1 signs the first admin in', r.statusCode === 200, r.body);
+  ok('the session asks for a new password', r.body && r.body.user && r.body.user.forceChange === true, r.body && r.body.user);
+  r = await loginWith(A.login, 'second.admin@nerhadou.com', 'Nerhadou#Hub2026');
+  ok('an admin cannot use another slot password', r.statusCode === 401, r.body);
+  r = await loginWith(A.login, 'second.admin@nerhadou.com', 'Second#Admin99');
+  ok('ADMIN_PASSWORD_2 signs the second admin in', r.statusCode === 200, r.body);
+  r = await loginWith(A.login, 'third.admin@nerhadou.com', '123456');
+  ok('a slot without a password falls back to the first password', r.statusCode === 200, r.body);
+  r = await loginWith(A.login, 'feby_abdallah@nerhadou.com', '123456');
+  ok('a PM still signs in with the shared first password', r.statusCode === 200, r.body);
+  ok('a PM is not forced to change it', r.body.user.forceChange === false && r.body.user.mustChange === true, r.body.user);
+  ok('the PM only gets his own products', (r.body.user.brands || []).join() === 'Vitatron,Chromitron', r.body.user.brands);
+
+  console.log('\n[2] data stays closed until the admin sets his own password');
+  const adminToken = (await loginWith(A.login, 'mohamed.hany@nerhadou.com', 'Nerhadou#Hub2026')).body.token;
+  r = await getData(A.data, adminToken);
+  ok('GET /api/data -> 403 password_change_required', r.statusCode === 403 && r.body.error === 'password_change_required', r.body);
+
+  console.log('\n[3] the password policy');
+  r = await changePw(A.password, adminToken, 'Nerhadou#Hub2026', 'abc1234');
+  ok('7 characters is refused', r.statusCode === 400 && /8 characters/.test(r.body.error), r.body);
+  r = await changePw(A.password, adminToken, 'Nerhadou#Hub2026', '12345678');
+  ok('a digits-only password is refused', r.statusCode === 400, r.body);
+  r = await changePw(A.password, adminToken, 'Nerhadou#Hub2026', 'Nerhadou#Hub2026');
+  ok('the same password is refused', r.statusCode === 400, r.body);
+  r = await changePw(A.password, adminToken, 'wrong-current', 'BrandNew#Pass1');
+  ok('a wrong current password is refused', r.statusCode === 403, r.body);
+  r = await changePw(A.password, adminToken, 'Nerhadou#Hub2026', 'BrandNew#Pass1');
+  ok('a proper new password is accepted', r.statusCode === 200 && r.body.ok, r.body);
+  ok('a fresh token comes back', !!r.body.token);
+  const newToken = r.body.token;
+  r = await getData(A.data, newToken);
+  ok('the admin now reaches his data', r.statusCode === 200 && !!r.body.data, r.body && r.body.error);
+  r = await getData(A.data, adminToken);
+  ok('the old first-password token no longer opens data', r.statusCode === 403, r.statusCode);
+  r = await changePw(A.password, newToken, 'BrandNew#Pass1', 'Nerhadou#Hub2026');
+  ok('going back to the slot password is refused', r.statusCode === 400, r.body);
+
+  console.log('\n[4] five wrong attempts lock the address');
+  A = freshApi();
+  store.kv.clear(); store.hash.clear(); store.lists.clear();
+  const pm = 'feby_abdallah@nerhadou.com';
+  for (let i = 0; i < 5; i++) r = await loginWith(A.login, pm, 'nope' + i);
+  ok('the 5th wrong attempt locks', r.statusCode === 429, r.body);
+  r = await loginWith(A.login, pm, '123456');
+  ok('even the right password is refused while locked', r.statusCode === 429 && r.body.retryAfter > 0, r.body);
+  store.kv.delete('assetlib:lock:' + pm);
+  r = await loginWith(A.login, pm, '123456');
+  ok('clearing the counter unlocks it', r.statusCode === 200, r.body);
+  r = await loginWith(A.login, pm, 'wrong-one');
+  ok('one wrong attempt reports 4 attempts left', r.statusCode === 401 && r.body.attemptsLeft === 4, r.body);
+
+  console.log('\n[5] when Redis cannot be read, nobody signs in');
+  store.down = true;
+  r = await loginWith(A.login, pm, '123456');
+  ok('a first-password user is refused (503)', r.statusCode === 503, r.body);
+  store.down = false;
+  const tok = (await loginWith(A.login, pm, '123456')).body.token;
+  await changePw(A.password, tok, '123456', 'FebyPrivate#7');
+  store.down = true;
+  r = await loginWith(A.login, pm, 'FebyPrivate#7');
+  ok('a user who changed his password is refused too (no 123456 fallback)', r.statusCode === 503, r.body);
+  store.down = false;
+  r = await loginWith(A.login, pm, 'FebyPrivate#7');
+  ok('and signs in normally once the store is back', r.statusCode === 200, r.body);
+
+  console.log('\n' + pass + ' passed, ' + fail + ' failed');
+  await store.shutdown();
+  process.exit(fail ? 1 : 0);
+})().catch(e => { console.error(e); process.exit(2); });
+
+'use strict';
+/* Who may write what, and who owns the money lines. Run: node test/data.js */
+const { start } = require('./fake-redis');
+const path = require('path');
+
+let pass = 0, failn = 0;
+const ok = (name, cond, extra) => {
+  if (cond) { pass++; console.log('  ✓ ' + name); }
+  else { failn++; console.log('  ✗ ' + name + (extra !== undefined ? '  → ' + JSON.stringify(extra) : '')); }
+};
+
+const FILES = ['../api/login.js', '../api/password.js', '../api/data.js', '../lib/core.js', '../lib/team.js', '../lib/scope.js', '../lib/split.js'];
+function freshApi() {
+  FILES.forEach(p => { delete require.cache[require.resolve(path.join(__dirname, p))]; });
+  return {
+    login: require(path.join(__dirname, '../api/login.js')),
+    password: require(path.join(__dirname, '../api/password.js')),
+    data: require(path.join(__dirname, '../api/data.js'))
+  };
+}
+
+function res() {
+  const r = {
+    statusCode: 200, body: undefined, headers: {},
+    status(c) { r.statusCode = c; return r; },
+    setHeader(k, v) { r.headers[k] = v; return r; },
+    json(o) { r.body = o; return r; },
+    send(o) { r.body = o; return r; },
+    end(x) { if (x !== undefined) r.body = x; return r; }
+  };
+  return r;
+}
+const hit = (fn, { method = 'POST', body, headers = {} }) => {
+  const r = res();
+  return fn({ method, query: {}, url: '/', headers: Object.assign({ 'content-type': 'application/json' }, headers), body: body === undefined ? undefined : JSON.stringify(body) }, r).then(() => r);
+};
+const loginWith = (A, email, password) => hit(A.login, { body: { email, password } });
+const get = (A, tok) => hit(A.data, { method: 'GET', headers: hdr(tok) });
+const put = (A, tok, key, value, extra) => hit(A.data, { method: 'PUT', headers: hdr(tok), body: Object.assign({ key, value }, extra || {}) });
+const hdr = tok => ({ authorization: 'Bearer ' + tok });
+const stored = (store, key) => { try { return JSON.parse(store.kv.get('assetlib:' + key) || '[]'); } catch (e) { return []; } };
+const sum = rows => rows.reduce((a, r) => a + (+r.amount || 0), 0);
+const CONF_KEY = 'conferences';
+
+let store, A, admin, feby, rasha, r;
+
+(async () => {
+  store = await start();
+  process.env.SESSION_SECRET = 'test-secret';
+  process.env.UPSTASH_REDIS_REST_URL = store.url;
+  process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
+  process.env.ADMIN_EMAIL_1 = 'mohamed.hany@nerhadou.com';
+  process.env.ADMIN_PASSWORD_1 = 'Nerhadou#Hub2026';
+  A = freshApi();
+
+  /* the products and the Conference Shares table, as the admin's page stores them */
+  store.kv.set('assetlib:portfolio', JSON.stringify([
+    { id: 1, brand: 'Vitatron' }, { id: 2, brand: 'Chromitron' }, { id: 3, brand: 'Octatron' }, { id: 4, brand: 'Methyltechno (Private)' }
+  ]));
+  store.kv.set('assetlib:specshare', JSON.stringify([
+    { id: 10, spec: 'Diabetes', prod: 'Vitatron', pct: 7.5 },
+    { id: 11, spec: 'Diabetes', prod: 'Octatron', pct: 60 },
+    { id: 12, spec: 'Diabetes', prod: 'Chromitron', pct: 32.5 }
+  ]));
+
+  admin = (await loginWith(A, 'mohamed.hany@nerhadou.com', 'Nerhadou#Hub2026')).body.token;
+  let pw = await hit(A.password, { headers: hdr(admin), body: { current: 'Nerhadou#Hub2026', next: 'Admin#Own1' } });
+  admin = pw.body.token || admin;
+  feby = (await loginWith(A, 'feby_abdallah@nerhadou.com', '123456')).body.token;
+  rasha = (await loginWith(A, 'rasha.samy@nerhadou.com', '123456')).body.token;
+
+  console.log('\n[1] a conference entered by a PM is split by the server, not by his browser');
+  const conf = { id: 500, name: 'Diabetes Congress', spec: 'Diabetes', date: '2026-11-05', c26: 100000, status: 'Waiting for Admin Approval', att: 0 };
+  r = await put(A, feby, 'conferences', [conf], { known: true });
+  ok('the PM saves his conference', r.statusCode === 200, r.body);
+  const auto = stored(store, 'expenses').filter(x => x.auto && x.ck === 'conferences');
+  ok('one generated line per product in the shares table', auto.length === 3, auto);
+  ok('the whole amount is recorded, not only his share', sum(auto) === 100000, sum(auto));
+  ok('his own product keeps its 7.5%', (auto.find(x => x.brand === 'Vitatron') || {}).amount === 7500, auto);
+  ok('Octatron is charged its 60% without Rasha doing anything', (auto.find(x => x.brand === 'Octatron') || {}).amount === 60000, auto);
+  ok('the line points at its source', auto.every(x => String(x.conf) === '500'), auto);
+  ok('and says where the money came from', /7\.5% allocation/.test((auto.find(x => x.brand === 'Vitatron') || {}).desc || ''), (auto[0] || {}).desc);
+
+  console.log('\n[2] each PM only sees his own part');
+  r = await get(A, feby);
+  const febyEx = (r.body.data.expenses || []).filter(x => x.auto);
+  ok('Feby sees the Vitatron and Chromitron lines', febyEx.length === 2, febyEx);
+  r = await get(A, rasha);
+  const rashaEx = (r.body.data.expenses || []).filter(x => x.auto);
+  ok('Rasha sees the Octatron line', rashaEx.length === 1 && rashaEx[0].amount === 60000, rashaEx);
+
+  console.log('\n[3] a generated line cannot be posted from the browser');
+  r = await put(A, feby, 'expenses', [
+    { id: 900, brand: 'Vitatron', cat: 'Gimmicks', name: 'My own gimmick', amount: 1000, date: '2026-11-01', status: 'Waiting for Admin Approval' },
+    { id: 901, brand: 'Octatron', cat: 'Conferences', name: 'Fake split', amount: 999999, auto: 1, ck: 'conferences', conf: 500, status: 'Approved' }
+  ], { known: true });
+  ok('the PM saves his own expense', r.statusCode === 200, r.body);
+  ok('the invented AUTO line is not stored', !stored(store, 'expenses').some(x => x.id === 901), stored(store, 'expenses').filter(x => x.auto).length);
+  ok('the real split of the conference is untouched', sum(stored(store, 'expenses').filter(x => x.auto && x.ck === 'conferences')) === 100000, null);
+  ok('the PM is told what is really stored', r.body.value !== undefined && !r.body.value.some(x => x.id === 901), r.body.value && r.body.value.length);
+
+  console.log('\n[4] the admin saves the whole table and loses nothing');
+  const before = stored(store, 'conferences').length;
+  r = await put(A, admin, 'conferences', [{ id: 501, name: 'Cardiology Congress', spec: 'Cardiology', date: '2026-12-01', c26: 0, status: 'Approved' }], { known: true });
+  ok('his one-row save does not erase Feby’s conference', stored(store, 'conferences').length === before + 1, stored(store, 'conferences').map(x => x.id));
+  ok('Feby’s row is exactly as it was', (stored(store, 'conferences').find(x => x.id === 500) || {}).c26 === 100000, null);
+
+  console.log('\n[5] deletion is explicit');
+  r = await put(A, admin, 'expenses', []);
+  ok('a page that never loaded the table cannot empty it', r.statusCode === 409, r.body);
+  r = await put(A, admin, 'conferences', [{ id: 501 }, { id: 500 }], { known: true, deleted: ['500'] });
+  ok('the admin deletes the conference by id', stored(store, 'conferences').length === 1 && !stored(store, 'conferences').some(x => x.id === 500), stored(store, 'conferences').map(x => x.id));
+  ok('and every generated line goes with it', stored(store, 'expenses').filter(x => x.auto && String(x.conf) === '500').length === 0, stored(store, 'expenses').filter(x => x.auto));
+  ok('but the PM’s own gimmick survives', stored(store, 'expenses').some(x => x.id === 900), null);
+
+  console.log('\n[6] a shared gimmick splits on the server');
+  r = await put(A, feby, 'expenses', [
+    { id: 900, brand: 'Vitatron', cat: 'Gimmicks', name: 'My own gimmick', amount: 1000, date: '2026-11-01', status: 'Waiting for Admin Approval' },
+    { id: 902, brand: 'Vitatron', cat: 'Gimmicks', name: 'Booth with Chromitron', gross: 4000, amount: 3000, shareWith: 'Chromitron', sharePct: 25, date: '2026-11-02', status: 'Waiting for Admin Approval' }
+  ], { known: true });
+  const share = stored(store, 'expenses').find(x => x.auto && x.ck === 'share' && String(x.conf) === '902');
+  ok('the other product gets its 25%', share && share.amount === 1000 && share.brand === 'Chromitron', share);
+  r = await put(A, feby, 'expenses', [
+    { id: 900, brand: 'Vitatron', cat: 'Gimmicks', name: 'My own gimmick', amount: 1000, date: '2026-11-01', status: 'Waiting for Admin Approval' }
+  ], { known: true, deleted: ['902'] });
+  ok('deleting the source deletes its share line', !stored(store, 'expenses').some(x => x.auto && x.ck === 'share' && String(x.conf) === '902'), null);
+
+  console.log('\n[7] changing the shares table re-splits what is already stored');
+  const conf600 = { id: 600, name: 'Diabetes Meet', spec: 'Diabetes', date: '2026-11-20', c26: 50000, status: 'Approved' };
+  r = await put(A, admin, 'conferences', [conf600], { known: true });
+  ok('the admin records a second conference', r.statusCode === 200, r.body);
+  const first = stored(store, 'expenses').filter(x => x.auto && x.ck === 'conferences' && String(x.conf) === '600');
+  ok('the first split follows the 7.5 / 60 / 32.5 table', sum(first) === 50000 && (first.find(x => x.brand === 'Vitatron') || {}).amount === 3750, first);
+  const newShares = [
+    { id: 10, spec: 'Diabetes', prod: 'Vitatron', pct: 50 },
+    { id: 11, spec: 'Diabetes', prod: 'Octatron', pct: 30 },
+    { id: 12, spec: 'Diabetes', prod: 'Chromitron', pct: 20 }
+  ];
+  r = await put(A, admin, 'specshare', newShares, { known: true });
+  ok('the admin saves the percentages', r.statusCode === 200, r.body);
+  const again = stored(store, 'expenses').filter(x => x.auto && x.ck === 'conferences' && String(x.conf) === '600');
+  ok('the stored conference re-split without touching its row', sum(again) === 50000 && (again.find(x => x.brand === 'Vitatron') || {}).amount === 25000, again);
+  ok('and the other rows of the ledger were not lost', stored(store, 'expenses').some(x => x.id === 900), null);
+
+  console.log('\n[8] the approval rule still works');
+  r = await put(A, feby, 'budget', [{ id: 700, brand: 'Vitatron', month: '2026-11', amount: 5000, status: 'Approved' }], { known: true });
+  ok('a PM cannot approve his own row', r.body.value && r.body.value[0].status === 'Waiting for Admin Approval', r.body);
+  r = await get(A, admin);
+  ok('and the admin sees it waiting', (r.body.data.budget || []).some(x => x.id === 700 && x.status === 'Waiting for Admin Approval'), null);
+
+  console.log('\n[9] the write gates');
+  r = await put(A, feby, 'specshare', [], { known: true });
+  ok('a PM cannot write the shares table', r.statusCode === 403, r.body);
+  r = await put(A, feby, 'portfolio', [], { known: true });
+  ok('a PM cannot write the product list', r.statusCode === 403, r.body);
+  r = await put(A, feby, 'nonsense', [], { known: true });
+  ok('an unknown key is refused', r.statusCode === 400, r.body);
+  r = await put(A, feby, 'expenses', { not: 'an array' }, { known: true });
+  ok('a wrong shape is refused', r.statusCode === 400, r.body);
+  store.down = true;
+  r = await put(A, feby, 'expenses', [], { known: true });
+  ok('when the store is down the save fails instead of pretending', r.statusCode === 500, r.body);
+  store.down = false;
+
+  console.log('\n[10] the doctor lists live in their own key');
+  const names = [], amounts = [];
+  for (let i = 1; i <= 100; i++) { names.push('Dr. Mahmoud Abdelrahman Shalaby Al-Ahrami ' + i); amounts.push(1000); }
+  const conf800 = {
+    id: 800, name: 'Big Diabetes Meeting', spec: 'Diabetes', date: '2026-11-25', c26: 100000, i_reg: 100000,
+    registeredDoctors: names, registeredDoctorsAmt: amounts, accommodationDoctors: ['Dr Solo'], accommodationDoctorsAmt: [2500],
+    status: 'Approved'
+  };
+  r = await put(A, admin, CONF_KEY, stored(store, 'conferences').concat([conf800]), { known: true });
+  ok('a hundred doctors save', r.statusCode === 200, r.body);
+  const docKey = () => JSON.parse(store.kv.get('assetlib:docs') || '{}');
+  ok('they are stored in assetlib:docs', docKey()['800'].registeredDoctors.length === 100, null);
+  ok('and not inside the conference row', !stored(store, 'conferences').some(x => x.registeredDoctors !== undefined), null);
+  ok('the conferences table stays far below the value limit', JSON.stringify(stored(store, 'conferences')).length < 20000, JSON.stringify(stored(store, 'conferences')).length);
+  ok('the doctor key is bigger than the table it came from', docKey()['800'].registeredDoctors.join(',').length > JSON.stringify(stored(store, 'conferences')).length / 4, null);
+  r = await get(A, feby);
+  const back = (r.body.data[CONF_KEY] || []).find(x => x.id === 800) || {};
+  ok('the page gets them back on the row', back.registeredDoctors && back.registeredDoctors.length === 100 && back.accommodationDoctors[0] === 'Dr Solo', null);
+  ok('with the amounts', (back.registeredDoctorsAmt || []).length === 100 && back.registeredDoctorsAmt[0] === 1000, null);
+  const table = (await get(A, admin)).body.data[CONF_KEY];
+  r = await put(A, admin, CONF_KEY, table, { known: true });
+  ok('an unchanged save is not echoed back', r.statusCode === 200 && r.body.value === undefined, r.body);
+  r = await put(A, admin, CONF_KEY, table.map(x => Object.assign({}, x, x.id === 800 ? { place: 'Cairo' } : {})), { known: true });
+  ok('editing another field keeps the list', docKey()['800'].registeredDoctors.length === 100, null);
+  r = await put(A, admin, CONF_KEY, table.map(x => Object.assign({}, x, x.id === 800 ? { registeredDoctors: [], registeredDoctorsAmt: [], accommodationDoctors: [], accommodationDoctorsAmt: [] } : {})), { known: true });
+  ok('sending empty lists clears them', !docKey()['800'], null);
+  const cleared = (await get(A, admin)).body.data[CONF_KEY].find(x => x.id === 800);
+  ok('and the page sees them gone', !cleared.registeredDoctors || !cleared.registeredDoctors.length, cleared.registeredDoctors);
+  r = await put(A, admin, CONF_KEY, table.filter(x => x.id !== 800), { known: true, deleted: ['800'] });
+  ok('deleting the conference deletes its list', !docKey()['800'], r.body);
+  r = await put(A, feby, CONF_KEY, (await get(A, feby)).body.data[CONF_KEY], { known: true });
+  ok('a PM cannot write the lists of a conference he did not send', !docKey()['600'], null);
+
+  console.log('\n' + pass + ' passed, ' + failn + ' failed');
+  await store.shutdown();
+  process.exit(failn ? 1 : 0);
+})().catch(e => { console.error(e); process.exit(2); });
+
+'use strict';
+/* In-memory stand-in for the Upstash REST API, so the Vercel functions can be
+   exercised locally with no network. Speaks the same JSON command protocol. */
+const http = require('http');
+
+function makeStore() {
+  return { kv: new Map(), hash: new Map(), lists: new Map(), calls: [] };
+}
+
+function run(store, cmd) {
+  const op = String(cmd[0]).toUpperCase();
+  const arg = i => cmd[i];
+  const lc = i => String(cmd[i]).toLowerCase();
+  store.calls.push(op);
+  switch (op) {
+    case 'GET': return store.kv.has(String(arg(1))) ? store.kv.get(String(arg(1))) : null;
+    case 'SET': {
+      store.kv.set(String(arg(1)), String(arg(2)));
+      return 'OK';
+    }
+    case 'DEL': {
+      let n = 0;
+      for (let i = 1; i < cmd.length; i++) {
+        const k = String(cmd[i]);
+        if (store.kv.delete(k) || store.lists.delete(k) || store.hash.delete(k)) n++;
+      }
+      return n;
+    }
+    case 'INCR': {
+      const k = String(arg(1));
+      const v = (parseInt(store.kv.get(k) || '0', 10) || 0) + 1;
+      store.kv.set(k, String(v));
+      return v;
+    }
+    case 'MGET': return cmd.slice(1).map(k => (store.kv.has(String(k)) ? store.kv.get(String(k)) : null));
+    case 'HGET': {
+      const h = store.hash.get(String(arg(1)));
+      if (!h) return null;
+      const v = h.get(lc(2));
+      return v === undefined ? null : v;
+    }
+    case 'HSET': {
+      const k = String(arg(1));
+      if (!store.hash.has(k)) store.hash.set(k, new Map());
+      store.hash.get(k).set(lc(2), String(arg(3)));
+      return 1;
+    }
+    case 'HGETALL': {
+      const h = store.hash.get(String(arg(1)));
+      if (!h) return [];
+      const flat = [];
+      h.forEach((v, k) => { flat.push(k, v); });
+      return flat;
+    }
+    case 'HDEL': {
+      const h = store.hash.get(String(arg(1)));
+      return h ? (h.delete(lc(2)) ? 1 : 0) : 0;
+    }
+    case 'LPUSH': {
+      const k = String(arg(1));
+      if (!store.lists.has(k)) store.lists.set(k, []);
+      cmd.slice(2).reverse().forEach(x => store.lists.get(k).unshift(String(x)));
+      return store.lists.get(k).length;
+    }
+    case 'LTRIM': {
+      const k = String(arg(1));
+      const l = store.lists.get(k) || [];
+      const start = parseInt(arg(2), 10), stop = parseInt(arg(3), 10);
+      store.lists.set(k, l.slice(start, stop < 0 ? undefined : stop + 1));
+      return 'OK';
+    }
+    case 'LRANGE': {
+      const l = store.lists.get(String(arg(1))) || [];
+      const start = parseInt(arg(2), 10), stop = parseInt(arg(3), 10);
+      return l.slice(start, stop < 0 ? undefined : stop + 1);
+    }
+    case 'KEYS': {
+      const pat = String(arg(1));
+      const re = new RegExp('^' + pat.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
+      return [...store.kv.keys(), ...store.lists.keys(), ...store.hash.keys()].filter(k => re.test(k));
+    }
+    default: throw new Error('fake redis: unsupported ' + op);
+  }
+}
+
+function start({ fail = false } = {}) {
+  const store = makeStore();
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => {
+      if (store.down) { res.writeHead(503); return res.end('{"error":"storage is down"}'); }
+      let out;
+      try { out = { result: run(store, JSON.parse(body || '[]')) }; }
+      catch (e) { out = { error: e.message }; }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(out));
+    });
+  });
+  return new Promise(resolve => {
+    server.listen(0, '127.0.0.1', () => {
+      const url = 'http://127.0.0.1:' + server.address().port;
+      store.server = server;
+      store.url = url;
+      store.shutdown = () => new Promise(r => server.close(r));
+      resolve(store);
+    });
+  });
+}
+
+module.exports = { start };
