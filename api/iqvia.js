@@ -20,6 +20,9 @@ module.exports = async (req, res) => {
   try {
     res.status(200).json(require(file));
   } catch (e) {
-    res.status(404).json({ error: 'not available' });
+    /* The JSON sits outside api/, so Vercel must carry it into the function bundle.
+       If it did not, this is a deployment problem and must not look like a bad request. */
+    console.error('iqvia: ' + name + ' could not be read: ' + e.message);
+    res.status(500).json({ error: 'the market data file is missing from this deployment', detail: String(e.message || '').slice(0, 160) });
   }
 };
