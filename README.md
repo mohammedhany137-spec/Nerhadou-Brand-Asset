@@ -1,6 +1,23 @@
 # Nerhadou Marketing Hub (one app, one sidebar)
 Designed by Nerhadou Marketing Team · Developed by Mohamed Hany
 
+## v11 — security review fixes
+
+| Fix | Where |
+|---|---|
+| Every stored text is escaped before it reaches the page (10 file sections, dashboards, approvals, audit, search, exports) | `ESC` / `ATTR` / `HREF` in `index.html`, asserted by `test/xss.js` |
+| File links cannot carry a `javascript:` / `data:` URL; Excel exports cannot carry a formula | `HREF` + `xg` |
+| Login refuses when Redis is unreadable, locks after 5 wrong attempts, min 8 characters, forced change for admins and GPMs, one password per admin slot | `lib/core.js`, `lib/team.js`, `api/login.js`, `api/password.js` |
+| An admin save merges **by row id**, so it never wipes another PM's rows; conference/event `auto` split lines are computed **on the server**, so a PM is charged only her percentage | `lib/scope.js`, `lib/split.js`, `api/data.js` |
+| Doctor lists moved to their own Redis key (`assetlib:docs`), no longer inside the `conferences` value | `lib/docs.js` |
+| `data/iqvia*.json` and `lib/*` removed from the public path | `vercel.json` rewrites → `api/shield.js`, `api/iqvia.js` |
+| Nightly encrypted backup on Vercel Blob + manual 💾 download | `api/backup.js`, `lib/backup.js`, the cron in `vercel.json` |
+| Security headers + CSP | `vercel.json` |
+
+Local checks: `node test/auth.js` (25), `node test/data.js` (46), `node test/private.js` (26),
+`node test/xss.js` (53) — all with `C:/…/AppData/Local/deno/node_compat_bin/node.exe`.
+Nothing listed above changes what a page looks like or how the fields are wired together.
+
 ## v10 — people, products, and safe saving
 
 ### Who sees what (one roster: `lib/team.js`)
@@ -23,16 +40,34 @@ Team 2  GPM reham_mostafa     Nourhan (Methyltechno) · Diaa (Techno B Complex) 
 Team 3  GPM basem_fathy       Ali (Ondalenz 8mg, Meclizigo) · Sherry (Ondalenz 4mg, Nerdecong, Tulitroph) · Ahmed A. (Spasulanse, Lopranest) · Mohamed Nessim (Nerhaflux) · Amir (Nopyretron)
 Team 4  GPM ahmed_abdelgawad   Rasha (Octatron) · Dadamouny (Tadanerfi 5/20mg, Nerhasilda) · Amira (Zinctron, Trib Gold) · Zeyad (Nercafix, Hi-Potency) · Hassan (Melacryst) · Nadeen (Nerkardou)
 ```
-Admins: `mohamed.hany@nerhadou.com` (add more with `ADMIN_EMAILS`).
+Admins: `mohamed.hany@nerhadou.com` plus the `ADMIN_EMAIL_1…5` slots (and any `ADMIN_EMAILS` entries).
 `Nerdecong` and `Tulitroph` (Sherry / Basem Fathy) were added to the product list; the first admin
 login after deploy creates the two brands in the portfolio automatically.
 
 ### Passwords
-Everybody signs in first with the shared default **123456** and can change it at any time
-from the 🔑 button — changing it is optional. Only a salted HMAC is stored in Redis
-(`assetlib:pw`); no password is ever written in clear text.
+Each admin slot has its own password, set as an environment variable (`ADMIN_PASSWORD_1` for
+`ADMIN_EMAIL_1`, and so on up to 5 — the numbering is fixed, a slot never borrows another's password).
+Anyone with no slot password still starts from `123456`.
+
+- **Admins and GPMs must change their password on first login**: a full-screen dialog opens before any
+  data is shown, and the server keeps refusing `/api/data`, `/api/team`, `/api/audit` and `/api/version`
+  until it is changed. For product managers the change stays optional.
+- **Minimum 8 characters**, rejected if all-digits or if it is still the default / slot password.
+- **5 wrong attempts lock the account for 15 minutes** (counter in Redis, `assetlib:lock:<email>`);
+  the login screen says how many attempts are left and, when locked, how long to wait.
+- **If Redis cannot be read, login is refused with `503`** — even for an account still on `123456`.
+  There is no fallback password.
+- Only a salted HMAC is stored in Redis (`assetlib:pw`); no password is ever written in clear text.
+  Tokens last 12 hours, and changing a password invalidates the old token.
 
 ### Saving (no lost edit)
+- Every save sends the rows **plus the ids the user was last shown and the ids they deleted**, so the
+  server merges by id instead of replacing the whole list: an admin no longer erases the rows a PM
+  added while the admin's page was open. A real delete still works, because it is stated explicitly.
+- A save that would empty a table is refused (`409`) rather than written.
+- The `AUTO` lines of conferences, events and expenses are rebuilt by the server from the Conference
+  Shares table, so a PM entering a 100,000 conference is charged only her share, never the whole cost,
+  and no `auto` line can be attached to another product by hand.
 - One writer at a time; if you edit while a save is running, the new value is queued and sent
   next, and a server answer never overwrites a newer local edit.
 - A failed save retries alone (2s → 4s → 8s → 16s → 30s) with a red banner, and the browser
@@ -64,6 +99,8 @@ Nerhadou products are highlighted.
   block from the latest *IQVIA* sheet (**Aug 2026**).
 - `data/iqvia_products.json` (1.1 MB) = the product detail for the same periods; it is fetched
   only when the IQVIA page is opened.
+- Both files are **no longer reachable from the browser** — `/data/*` is rewritten to `api/shield.js`,
+  and the page reads them through `GET /api/iqvia?set=market|products` with its token.
 - To refresh the YTD/MAT part, replace both files with newly built ones — nothing else changes,
   and the 2022–2025 numbers stay as they are.
 
@@ -88,6 +125,10 @@ added to the new PM and removed from the old one immediately.
   (registered / accommodation). Paste two columns straight from Excel (`name` + Tab + `amount`),
   or one name per line, press **Apply to all** to give everybody the same amount, and
   **Save doctors** — the registration/accommodation cost and the conference total update at once.
+- The doctor lists are stored on their own Redis key (`assetlib:docs`), not inside the `conferences`
+  value, so sixty-name lists can no longer push the conference table over its size limit. The server
+  glues them back onto each conference row when the page loads, so the columns, the 👥 editor, the
+  paste-from-Excel box and the budget links work exactly as before.
 
 ### Expenses — a cost split between products (⚖)
 - Every expense row has a **⚖ button**: split the cost between **as many products as you want**
@@ -147,23 +188,45 @@ Other
 
 | Variable | Status |
 |---|---|
-| `SESSION_SECRET` | **required**, unchanged |
+| `SESSION_SECRET` | **required**, unchanged — also the key the daily backup is encrypted from |
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` (or `KV_REST_API_*`) | **required**, unchanged |
-| `ADMIN_EMAILS` | supported — **added to** the built-in `mohamed.hany@nerhadou.com` |
+| `ADMIN_EMAIL_1` … `ADMIN_EMAIL_5` | **new** — each with its own `ADMIN_PASSWORD_1` … `ADMIN_PASSWORD_5` (same numbering) |
+| `CRON_SECRET` | **new**, required for the nightly backup — a random string, and the Vercel Cron must be the production one |
+| `ADMIN_EMAILS` | supported — comma-separated extra admins, **added to** the built-in `mohamed.hany@nerhadou.com` |
 | `ADMIN_EMAIL` (old, singular) | still honoured — used as an extra admin |
-| `DEFAULT_PASSWORD` | new, optional (default `123456`) |
-| `USERS` | new, optional JSON to add/override people |
-| `ADMIN_PASSWORD`, `USER_PASSWORD`, `GPM_PASSWORD`, `GPM_EMAILS`, `USER_BRANDS`, `ALLOWED_DOMAIN` | **retired** — replaced by the roster (`lib/team.js`) and the shared first password. Leaving them in Vercel does no harm, they are simply not read any more. |
+| `DEFAULT_PASSWORD` | optional (default `123456`) for any slot or person with no password of its own |
+| `USERS` | optional JSON to add/override people |
+| `ADMIN_PASSWORD`, `USER_PASSWORD`, `GPM_PASSWORD`, `GPM_EMAILS`, `USER_BRANDS`, `ALLOWED_DOMAIN` | **retired** — replaced by the roster (`lib/team.js`) and the per-slot passwords. Leaving them in Vercel does no harm, they are simply not read any more. |
 
-3. Redeploy, then sign in with an admin email and `123456` (change it afterwards from 🔑 if you like).
+Add them under **Settings → Environment Variables → Production**. If you keep a Preview deployment,
+point it at a **separate Redis** (own `UPSTASH_*` values) so a test save never writes production data.
+
+Five things about those variables that are easy to get wrong (same list in `SPEC-KIT.md` §3 and §8):
+1. `ADMIN_EMAIL_n` only accepts `ADMIN_PASSWORD_n` — a swapped pairing is rejected.
+2. A slot with no password falls back to `DEFAULT_PASSWORD` (123456) **and** forces a change at first login.
+3. `SESSION_SECRET` is changed once (to generate `CRON_SECRET`, with `TOKEN_V=11`) — changing it again
+   makes every stored `backups/*.enc` unreadable.
+4. The Vercel Cron runs on **production only**.
+5. `data/iqvia*.json` is hidden by the rewrites in `vercel.json`; the page reads it through
+   `/api/iqvia` with its token.
+
+3. Redeploy, then sign in with an admin email and its `ADMIN_PASSWORD_n` (an admin with no slot
+   password uses `123456`) — the first screen forces a new password before any data is shown.
+4. Run the checklist in `SPEC-KIT.md` §8: `curl -I` on `/data/iqvia.json` and `/lib/team.js` (both must
+   be **404**, never 200), `GET /api/iqvia?set=market` with and without a token (200 / 401), five wrong
+   passwords (lock message), then a PM conference and an admin edit of the same row, and the browser
+   console free of CSP violations.
 
 ### API
 | Route | Purpose |
 |---|---|
-| `POST /api/login` | email + password → token, role, products, team, manager |
-| `GET /api/data` | scoped data + `rev` |
-| `PUT /api/data` | save one key (merged with the rows of other products, bump `rev`) |
+| `POST /api/login` | email + password → token, role, products, team, manager; `401` with attempts left, `429` when locked, `503` when Redis is down |
+| `GET /api/data` | scoped data + `rev` (doctors lists are re-attached to the conference rows, so the page is unchanged) |
+| `PUT /api/data` | save one key — body `{key, value, known, deleted}`; admin rows merge **by id**, `auto` rows are regenerated by the server, and an empty list is refused with `409` |
 | `GET /api/version` | the 11-byte data version |
-| `POST /api/password` | optional password change |
+| `POST /api/password` | password change (forced for admins and GPMs) |
 | `GET /api/team` | the team of a GPM (every team for an admin) |
 | `GET /api/audit` | audit log (admin) |
+| `GET /api/iqvia?set=market\|products` | the licensed IQVIA files, only with a valid token (`/data/*.json` itself is rewritten to `/api/shield`) |
+| `GET /api/backup` | admin: the whole database as plain JSON for the manual 💾 download (no password hashes in it) |
+| `POST /api/backup` | the nightly Cron (needs `Authorization: Bearer $CRON_SECRET`): AES-256-GCM copy on Blob, last 14 kept |
