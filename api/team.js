@@ -7,6 +7,7 @@ module.exports = async (req, res) => {
   let me;
   try { me = authUser(req); } catch (e) { return res.status(500).json({ error: 'server not configured' }); }
   if (!me) return res.status(401).json({ error: 'unauthorized' });
+  if (me.fc) return res.status(403).json({ error: 'password_change_required' });
   if (me.r === 'pm') return res.status(403).json({ error: 'forbidden' });
   const all = teams();
   const assign = await getAssign(appCfg(req).prefix);

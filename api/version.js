@@ -8,6 +8,7 @@ module.exports = async (req, res) => {
   let me;
   try { me = authUser(req); } catch (e) { return res.status(500).end(); }
   if (!me) return res.status(401).end();
+  if (me.fc) return res.status(403).end();
   try {
     const v = await revString(appCfg(req).prefix);
     return res.status(200).end(v);
