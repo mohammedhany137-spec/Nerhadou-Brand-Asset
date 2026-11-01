@@ -1,12 +1,33 @@
+const fs = require('fs'), path = require('path');
 const { authUser } = require('../lib/core');
 
-/* The IQVIA market figures are bought. They used to sit in /data where any visitor
-   could download them; now they are read here, by a signed-in member of the team only.
-   require() is what makes Vercel carry the two files along with this function. */
+/* The IQVIA figures are bought, so no visitor may download them — a signed-in member reads them here.
+   Vercel copies a file into the function bundle only when it can see the path as a plain string inside
+   require(), which a path held in a variable hides: the two names are written out below. */
 const SETS = {
-  market: '../data/iqvia.json',
-  products: '../data/iqvia_products.json'
+  market: () => require('../data/iqvia.json'),
+  products: () => require('../data/iqvia_products.json')
 };
+const NAMES = { market: 'iqvia.json', products: 'iqvia_products.json' };
+
+/* The builder has placed traced files in more than one spot, so every layout it may have used is
+   looked at, and a miss says which paths were searched instead of just failing. */
+function fromDisk(name) {
+  const f = NAMES[name];
+  const roots = [__dirname, path.join(__dirname, '..'), process.cwd(), '/var/task'];
+  const tried = [];
+  for (const d of roots) {
+    for (const p of [path.join(d, 'data', f), path.join(d, f)]) {
+      tried.push(p);
+      if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf8'));
+    }
+  }
+  throw new Error('no copy of ' + f + ' in this bundle — searched: ' + tried.join(' | '));
+}
+
+function load(name) {
+  try { return SETS[name](); } catch (e) { return fromDisk(name); }
+}
 
 module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -15,14 +36,12 @@ module.exports = async (req, res) => {
   if (!me) return res.status(401).json({ error: 'unauthorized' });
   if (me.fc) return res.status(403).json({ error: 'password_change_required' });
   const name = String((req.query && req.query.set) || '');
-  const file = SETS[name];
-  if (!file) return res.status(400).json({ error: 'bad set' });
+  if (!SETS[name]) return res.status(400).json({ error: 'bad set' });
   try {
-    res.status(200).json(require(file));
+    res.status(200).json(load(name));
   } catch (e) {
-    /* The JSON sits outside api/, so Vercel must carry it into the function bundle.
-       If it did not, this is a deployment problem and must not look like a bad request. */
+    /* A missing file is a deployment problem and must not look like a bad request. */
     console.error('iqvia: ' + name + ' could not be read: ' + e.message);
-    res.status(500).json({ error: 'the market data file is missing from this deployment', detail: String(e.message || '').slice(0, 160) });
+    res.status(500).json({ error: 'the market data file is missing from this deployment', detail: String(e.message || '').slice(0, 240) });
   }
 };
