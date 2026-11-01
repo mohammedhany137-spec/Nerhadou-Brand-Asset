@@ -1,5 +1,8 @@
 {
   "cleanUrls": true,
+  "functions": {
+    "api/iqvia.js": { "includeFiles": "data/**" }
+  },
   "crons": [
     { "path": "/api/backup", "schedule": "20 3 * * *" }
   ],
