@@ -4,9 +4,9 @@ const { encrypt } = require('../lib/backup');
 
 /* One snapshot of everything, two ways out of it:
  *
- *  GET   the Marketing Director presses 💾 and gets the plain JSON of the whole
- *        database - the server's copy, not the copy sitting in his browser tab.
- *  POST  the Vercel Cron job (Authorization: Bearer $CRON_SECRET) every night. The
+ *  signed in   the Marketing Director presses 💾 and gets the plain JSON of the whole
+ *              database - the server's copy, not the copy sitting in his browser tab.
+ *  cron        the Vercel Cron job (Authorization: Bearer $CRON_SECRET) every night. The
  *        snapshot is encrypted with AES-256-GCM before it leaves for Vercel Blob,
  *        because it contains the staff emails, the products and the money. The last
  *        fourteen nights are kept and the older ones are deleted.
@@ -43,11 +43,13 @@ module.exports = async (req, res) => {
   const A = appCfg(req);
   const method = String(req.method || '').toUpperCase();
 
-  if (method !== 'GET') {
-    const token = env('CRON_SECRET', '');
-    const head = String((req.headers && req.headers.authorization) || '');
-    if (!token || head !== 'Bearer ' + token) return res.status(401).json({ error: 'unauthorized' });
-  } else {
+  /* Vercel Cron calls with GET and "Authorization: Bearer $CRON_SECRET"; a manual POST with the
+     same secret is accepted too. Anything else has to be the Marketing Director, signed in. */
+  const token = env('CRON_SECRET', '');
+  const head = String((req.headers && req.headers.authorization) || '');
+  const isCron = !!token && head === 'Bearer ' + token;
+  if (!isCron && method !== 'GET') return res.status(401).json({ error: 'unauthorized' });
+  if (!isCron) {
     let me;
     try { me = authUser(req); } catch (e) { return res.status(500).json({ error: 'server not configured' }); }
     if (!me) return res.status(401).json({ error: 'unauthorized' });
@@ -55,7 +57,7 @@ module.exports = async (req, res) => {
     if (me.r !== 'admin') return res.status(403).json({ error: 'forbidden' });
   }
 
-  const json = method === 'GET';
+  const json = !isCron;
   let snap;
   try { snap = await readAll(A, !json); } catch (e) { return res.status(503).json({ error: 'the data store could not be read' }); }
   const text = JSON.stringify(snap);

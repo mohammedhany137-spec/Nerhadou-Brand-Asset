@@ -3,6 +3,10 @@ const { brandsFor, normBrand } = require('../lib/team');
 const { specIndex, filterValue, mergeValue, mergeById } = require('../lib/scope');
 const { isAuto, brandIndex, confLines, shareLines, stamp, shareStamp, regen } = require('../lib/split');
 const docs = require('../lib/docs');
+const notify = require('../lib/notify');
+const report = require('../lib/report');
+const geo = require('../lib/geo');
+const { findUser } = require('../lib/team');
 
 const MAX_SIZE = 900000;          // the Upstash value limit this deployment was built under
 const DOCS_MAX = 4000000;         // the doctor lists are their own key, so they are not held to it
@@ -49,7 +53,18 @@ module.exports = async (req, res) => {
       /* The lists go back onto their conference rows: the page asks for one table and
          gets its doctors with it, exactly as when they were stored inside the row. */
       if (Array.isArray(data[CONF])) data[CONF] = docs.attach(data[CONF], readObj(vals[KEYS.length]));
-      return res.status(200).json({ data, role: me.r, rev: await revString(A.prefix) });
+      /* The lines (one per GPM, with its products) let the page tie an area manager to the
+         products of his own line. Product names only - nothing a signed-in user may not know. */
+      let lines = [];
+      try { lines = geo.lines(assign, raw.portfolio).map(l => ({ key: l.key, gpm: l.gpm, brands: l.brands })); } catch (e) {}
+      /* A product manager is given his own line only, narrowed to his own products, and the
+         area managers of that line - not the other lines' people or product lists. */
+      if (me.r === 'pm') {
+        const own = (findUser(me.e) || {}).team || '';
+        lines = lines.filter(l => l.key === own).map(l => Object.assign({}, l, { brands: l.brands.filter(b => scope && scope.has(normBrand(b))) }));
+        if (Array.isArray(data.geoshare)) data.geoshare = data.geoshare.filter(g => g && g.line === own);
+      }
+      return res.status(200).json({ data, role: me.r, rev: await revString(A.prefix), lines });
     }
 
     if (req.method === 'PUT') {
@@ -57,6 +72,7 @@ module.exports = async (req, res) => {
       const { key, value } = body;
       if (!KEYS.includes(key)) return fail(res, 400, 'bad key');
       if (A.admin.includes(key) && me.r !== 'admin') return fail(res, 403, 'only the Marketing Director/Manager can change this');
+      if ((A.managers || []).includes(key) && me.r !== 'admin' && me.r !== 'gpm') return fail(res, 403, 'only a Group Product Manager or the Marketing Director/Manager can change this');
       if (A.objects.includes(key) ? (typeof value !== 'object' || Array.isArray(value) || !value) : !Array.isArray(value))
         return fail(res, 400, 'bad value');
 
@@ -94,6 +110,13 @@ module.exports = async (req, res) => {
       else if (key === LEDGER) merged = scope ? mergeValue(key, storedPlain, submitted, scope, specM, deleted) : mergeById(storedPlain, submitted, deleted);
       else if (scope) merged = mergeValue(key, prevArr, value, scope, specM, deleted);
       else merged = mergeById(prevArr, value, deleted);
+
+      /* A GPM manages the area managers of his own line only: the rows of the other lines stay
+         exactly as stored, whatever his page sent. */
+      if (key === 'geoshare' && me.r === 'gpm') {
+        const own = (findUser(me.e) || {}).team || '';
+        merged = prevArr.filter(r => r && r.line !== own).concat(value.filter(r => r && r.line === own));
+      }
 
       if (Array.isArray(submitted) && submitted.length === 0 && filterValue(key, storedPlain, scope, specM).length > 0 && !body.known)
         return fail(res, 409, 'an empty list would erase existing data; reload the page');
@@ -147,6 +170,23 @@ module.exports = async (req, res) => {
       if (ledger !== null) await redis(['SET', rk(LEDGER), JSON.stringify(ledger)]);
       await bumpRev(A.prefix);
       await audit(A.prefix, me.e, key, key === CONF ? docs.separate(prevArr)[0] : storedPlain, key === LEDGER ? merged : out);
+
+      /* The approver hears about it at once - at most one message per sender every ten
+         minutes, because the page saves as you type; the morning reminder covers the rest.
+         A channel that is down or not configured never holds the save back. */
+      if (me.r !== 'admin' && notify.approvalsOn()) {
+        try {
+          const fresh = report.newlyPending(key, key === CONF ? prevArr : storedPlain, key === LEDGER ? merged : out);
+          if (fresh.length && await redis(['SET', A.prefix + 'ntf:' + me.e, '1', 'NX', 'EX', '600'])) {
+            const first = fresh.slice(0, 5).map(r => '• ' + report.label(r) + (r.brand ? ' (' + r.brand + ')' : ''));
+            await notify.send({
+              to: report.approversOf(me.e), url: notify.hubUrl(req),
+              title: (me.n || me.e) + ' sent ' + fresh.length + ' item' + (fresh.length === 1 ? '' : 's') + ' for your approval',
+              lines: [(report.TITLES[key] || key) + ':'].concat(first, fresh.length > 5 ? ['… and ' + (fresh.length - 5) + ' more'] : [], ['Open Approvals in the Hub to approve, reject or ask for changes.'])
+            });
+          }
+        } catch (e) { console.error('notify failed:', e.message); }
+      }
 
       /* The page adopts the stored rows whenever this request changed something it
          cannot know about - an approval, a regenerated line, another product's line. */
