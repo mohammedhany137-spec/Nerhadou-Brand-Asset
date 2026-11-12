@@ -1,232 +1,94 @@
-# Nerhadou Marketing Hub (one app, one sidebar)
-Designed by Nerhadou Marketing Team · Developed by Mohamed Hany
+# Nerhadou Marketing Hub — version 18
 
-## v11 — security review fixes
+## What is in the project
 
-| Fix | Where |
-|---|---|
-| Every stored text is escaped before it reaches the page (10 file sections, dashboards, approvals, audit, search, exports) | `ESC` / `ATTR` / `HREF` in `index.html`, asserted by `test/xss.js` |
-| File links cannot carry a `javascript:` / `data:` URL; Excel exports cannot carry a formula | `HREF` + `xg` |
-| Login refuses when Redis is unreadable, locks after 5 wrong attempts, min 8 characters, forced change for admins and GPMs, one password per admin slot | `lib/core.js`, `lib/team.js`, `api/login.js`, `api/password.js` |
-| An admin save merges **by row id**, so it never wipes another PM's rows; conference/event `auto` split lines are computed **on the server**, so a PM is charged only her percentage | `lib/scope.js`, `lib/split.js`, `api/data.js` |
-| Doctor lists moved to their own Redis key (`assetlib:docs`), no longer inside the `conferences` value | `lib/docs.js` |
-| `data/iqvia*.json` and `lib/*` removed from the public path | `vercel.json` rewrites → `api/shield.js`, `api/iqvia.js` |
-| Nightly encrypted backup on Vercel Blob + manual 💾 download | `api/backup.js`, `lib/backup.js`, the cron in `vercel.json` |
-| Security headers + CSP | `vercel.json` |
+| Folder / file | What it is |
+| --- | --- |
+| `public/` | The site itself: `index.html` (page shell), `app.js` (application), `app.css` (styles), `logo.png`. **Only this folder is published.** |
+| `api/` | The server endpoints (sign-in, data, IQVIA, backup, scheduled messages). |
+| `lib/` | Server code shared by the endpoints (team roster, scoping, reports, notifications). |
+| `data/` | Files only the server reads: the built-in IQVIA data and `seed.json` (the starting figures). |
+| `vercel.json` | Deployment settings. `"outputDirectory": "public"` is what keeps `lib/` and `data/` private. |
 
-Local checks: `node test/auth.js` (25), `node test/data.js` (46), `node test/private.js` (26),
-`node test/xss.js` (53) — all with `C:/…/AppData/Local/deno/node_compat_bin/node.exe`.
-Nothing listed above changes what a page looks like or how the fields are wired together.
+## After deploying, check these three things
 
-## v10 — people, products, and safe saving
+1. Open `https://<your-site>/lib/team.js` and `https://<your-site>/data/seed.json` in a browser. Both must answer **404**.
+2. In Vercel → project → Cron Jobs → `/api/backup` → View Logs: the nightly run must answer **200**. (Before version 14 it answered 401, because the job is called with GET and the old code only accepted its secret on other methods.)
+3. Sign in as the Marketing Director, open the account menu → Data tools → Messages, and press **Send me a test message**.
 
-### Who sees what (one roster: `lib/team.js`)
-| Role | Sees | Can edit |
-|---|---|---|
-| **Admin** (`ADMIN_EMAILS`) | everything, plus **Pipelines**, **Alerts**, **Audit Log**, **Modules** | everything |
-| **GPM** | only the products of the product managers of **his team** (and can enter data for them) | those products |
-| **PM** | only **his own** products, dashboards included | his own products |
+## Environment variables (Vercel → Settings → Environment Variables)
 
-Scoping is enforced **on the server** (`lib/scope.js`), not only in the browser: `/api/data`
-only returns the rows of the user's products, and when a product manager saves, the rows of
-every other product are kept untouched on the server. Conference / event rows are matched
-through their product split or through the Conference Shares table.
+Already in use and unchanged: `SESSION_SECRET`, the Upstash Redis variables, `CRON_SECRET`, and the Vercel Blob token used by the nightly backup.
 
-`lib/team.js` holds the teams:
+New in version 14, all optional. Nothing is sent until at least one channel is set.
 
-```
-Team 1  GPM islam.zahran      Feby (Vitatron, Chromitron) · Mahmoud (Calcitron) · Ahmed (Ferrotron, Ferrotron Forte)
-Team 2  GPM reham_mostafa     Nourhan (Methyltechno) · Diaa (Techno B Complex) · Mohamed Hany (Vita D3, Vita D3+K2, Zolmsolan, Nerhapezil)
-Team 3  GPM basem_fathy       Ali (Ondalenz 8mg, Meclizigo) · Sherry (Ondalenz 4mg, Nerdecong, Tulitroph) · Ahmed A. (Spasulanse, Lopranest) · Mohamed Nessim (Nerhaflux) · Amir (Nopyretron)
-Team 4  GPM ahmed_abdelgawad   Rasha (Octatron) · Dadamouny (Tadanerfi 5/20mg, Nerhasilda) · Amira (Zinctron, Trib Gold) · Zeyad (Nercafix, Hi-Potency) · Hassan (Melacryst) · Nadeen (Nerkardou)
-```
-Admins: `mohamed.hany@nerhadou.com` plus the `ADMIN_EMAIL_1…5` slots (and any `ADMIN_EMAILS` entries).
-`Nerdecong` and `Tulitroph` (Sherry / Basem Fathy) were added to the product list; the first admin
-login after deploy creates the two brands in the portfolio automatically.
+| Variable | Purpose |
+| --- | --- |
+| `TEAMS_WEBHOOK_URL` | A Microsoft Teams *Workflows* webhook ("Post to a channel when a webhook request is received"). Messages appear as cards in that channel. |
+| `RESEND_API_KEY` + `MAIL_FROM` | Email through resend.com. `MAIL_FROM` looks like `Nerhadou Hub <hub@your-domain>`; the domain has to be verified in Resend. |
+| `HUB_URL` | The address of the site, used for the "Open the Hub" button. If empty, the address of the request is used. |
+| `NOTIFY_APPROVALS` | Set to `off` to stop approval messages. The monthly report still goes out. |
 
-### Passwords
-Each admin slot has its own password, set as an environment variable (`ADMIN_PASSWORD_1` for
-`ADMIN_EMAIL_1`, and so on up to 5 — the numbering is fixed, a slot never borrows another's password).
-Anyone with no slot password still starts from `123456`.
+Redeploy after changing a variable.
 
-- **Admins and GPMs must change their password on first login**: a full-screen dialog opens before any
-  data is shown, and the server keeps refusing `/api/data`, `/api/team`, `/api/audit` and `/api/version`
-  until it is changed. For product managers the change stays optional.
-- **Minimum 8 characters**, rejected if all-digits or if it is still the default / slot password.
-- **5 wrong attempts lock the account for 15 minutes** (counter in Redis, `assetlib:lock:<email>`);
-  the login screen says how many attempts are left and, when locked, how long to wait.
-- **If Redis cannot be read, login is refused with `503`** — even for an account still on `123456`.
-  There is no fallback password.
-- Only a salted HMAC is stored in Redis (`assetlib:pw`); no password is ever written in clear text.
-  Tokens last 12 hours, and changing a password invalidates the old token.
+## Messages the Hub sends
 
-### Saving (no lost edit)
-- Every save sends the rows **plus the ids the user was last shown and the ids they deleted**, so the
-  server merges by id instead of replacing the whole list: an admin no longer erases the rows a PM
-  added while the admin's page was open. A real delete still works, because it is stated explicitly.
-- A save that would empty a table is refused (`409`) rather than written.
-- The `AUTO` lines of conferences, events and expenses are rebuilt by the server from the Conference
-  Shares table, so a PM entering a 100,000 conference is charged only her share, never the whole cost,
-  and no `auto` line can be attached to another product by hand.
-- One writer at a time; if you edit while a save is running, the new value is queued and sent
-  next, and a server answer never overwrites a newer local edit.
-- A failed save retries alone (2s → 4s → 8s → 16s → 30s) with a red banner, and the browser
-  warns before you close the tab while something is still unsaved.
-- Inline cells save on blur and on **Enter**; dialog fields save on **Enter** too.
-- Saving is the submission: any add or edit of a contributor is stored as **Waiting for Admin
-  Approval** at once (no separate "submit" step), and the approver keeps the same Approve /
-  Reject / Changes-requested actions in **Approvals**. A small toast says
-  "Saved ✓ sent to the GPM … for review", and a red toast says when the save failed.
-- The approval workflow, the theme, the links and every existing function are untouched.
+- **At once**: when a product manager or GPM saves items that need approval, the approver (the GPM, otherwise the Director/Manager) gets one message — at most one per sender every ten minutes.
+- **Every morning** (05:00 UTC, 07:00 Cairo): each approver with items waiting gets one reminder.
+- **On the 1st of the month**: everyone gets the monthly report of the brands he or she owns — company sales YTD, Ach% vs target, spend against budget. These are company sales, not in-market (IQVIA) figures.
 
-### Cheap refresh
-Every open page asks for `/api/version` — an **11-byte** number — every **90 seconds**
-(and when the tab becomes visible again). The data itself is downloaded **only when that
-number changed**, so the free Redis quota is not burned by polling.
+## Updating the IQVIA data each month
 
-### IQVIA market page (`data/iqvia.json`)
-A new sidebar page **IQVIA Market (Egypt)**: pick any of the 516 ATC4 markets (type to search),
-then choose the periods you want (2022, 2023, 2024, 2025, **YTD Aug 2025/2026**, **MAT Aug 2025/2026**)
-and the metric (LC Value or Units). It shows market size, the company's sales, **MS%**, **Gr%
-year over year**, **Δ share (pp)** and a **3-year CAGR (2022 → 2025)**, plus the top companies
-and two charts.
+IQVIA Market page → **Update from the monthly IQVIA file** (Director/Manager only).
 
-Under it, **Products in this market** lists every product of the ATC4 (10,311 products in total):
-product, company, units, LC value, **MS%** and **Gr%** for any period you pick, with a search box;
-Nerhadou products are highlighted.
+The Excel file needs one row per product or pack, with these columns (any order, any titles):
+ATC4 market · Product · Company · and, for every period, a **Units** column and a **Value (EGP)** column.
+Periods are recognised from the titles: a year (`2025`), `YTD 09/2026`, `MAT Sep 2026`, and so on. USD columns are ignored.
+The Hub proposes the columns, shows the totals before anything is saved, and you can correct any choice.
+**Go back to the built-in data** removes the upload.
 
-- `data/iqvia.json` (206 KB) = ATC4 totals: 2022–2025 (static, from *Total IMS*) + the YTD/MAT
-  block from the latest *IQVIA* sheet (**Aug 2026**).
-- `data/iqvia_products.json` (1.1 MB) = the product detail for the same periods; it is fetched
-  only when the IQVIA page is opened.
-- Both files are **no longer reachable from the browser** — `/data/*` is rewritten to `api/shield.js`,
-  and the page reads them through `GET /api/iqvia?set=market|products` with its token.
-- To refresh the YTD/MAT part, replace both files with newly built ones — nothing else changes,
-  and the 2022–2025 numbers stay as they are.
+## Importing company sales
 
-### Brand → product manager
-**Brand Asset → Brands** now has a *Product manager* column. An admin can:
-- choose the responsible PM while creating a brand (`+ Add Brand`), or
-- press ✏️ next to any brand to move it to another PM.
+Sales Entry page → **Import company sales from Excel** (Director/Manager only).
+Works with one row per product per month, or one column per month. Product names are matched to brands;
+the matches you correct are remembered for the next import. Nothing is saved until you press Import.
 
-The assignment is stored in Redis (`assetlib:assign`) and wins over `lib/team.js`: it is applied
-at login, in the data scope of every request and on the *My Team* page — so a moved brand is
-added to the new PM and removed from the old one immediately.
+## GeoShare and the Geo-share Dashboard
 
-### Conferences — doctors, cities and filters
-- **Registered doctors** and **Accommodation doctors** are now real lists: each line has a **name + an
-  amount**, a live total, **“Amount for all”** (write 10,000 once and apply it to everybody), and
-  **📋 Paste from Excel** — paste 50–60 names at once (one per line, or `name<TAB>amount`).
-- The list total fills *Registration cost* / *Accommodation cost*, and those feed the conference
-  total, Budget Tracking and Expenses as before.
-- New **City** field (27 Egyptian governorates) and three extra filters on the Conferences page:
-  **doctor name**, **organizer** and **city**.
-- Every conference row also has a **👥 button**: a fast doctor editor with two big boxes
-  (registered / accommodation). Paste two columns straight from Excel (`name` + Tab + `amount`),
-  or one name per line, press **Apply to all** to give everybody the same amount, and
-  **Save doctors** — the registration/accommodation cost and the conference total update at once.
-- The doctor lists are stored on their own Redis key (`assetlib:docs`), not inside the `conferences`
-  value, so sixty-name lists can no longer push the conference table over its size limit. The server
-  glues them back onto each conference row when the page loads, so the columns, the 👥 editor, the
-  paste-from-Excel box and the budget links work exactly as before.
+- A **line** is a Group Product Manager's team and its products (taken from the team roster).
+- **GeoShare** (Tracking System): for each line, its area managers — name, the GM he reports to, the region he covers and his geo-share in %. The geo-shares of one line cannot pass 100%. A GPM edits the area managers of his own line, the Marketing Director/Manager every line; product managers read.
+- **Geo-share Dashboard** (Dashboards): for every area manager, his share of his line's budget for the year, what the gimmicks, conferences and events of that line's products have consumed in his region, and what is left. Also summed per GM.
+- The link is the **Region** chosen on an expense, a conference or an event:
+  one region goes to the manager of that region in the same line (several managers of one region share it in proportion to their geo-share);
+  several regions divide the cost equally between them; "All regions" spreads it over every manager of the line by geo-share;
+  an item with no region, or with a region nobody in the line covers, is listed apart so that nothing disappears.
+- **Budget used up**: an area manager at 100% of his budget share (90% as a warning) shows in Alerts, on the bell and on the dashboard. When a message channel is configured, the Director/Manager and the GPM of his line get one message the morning after it happens.
+- **Conference Shares** is shown in full to everybody (read-only unless Director/Manager).
 
-### Expenses — a cost split between products (⚖)
-- Every expense row has a **⚖ button**: split the cost between **as many products as you want**
-  (the owner is always in the list) and the percentages **must total 100%**.
-  Example: a Bag of 10,000 → Vitatron 60% · Octatron 30% · Zinctron 10%.
-- The owner keeps only its own part (6,000) and **each other product gets its own expense line
-  automatically** (3,000 / 1,000), marked `AUTO`, so nobody re-enters it.
-- The product manager who receives it sees a green banner **“N costs shared with your product”**
-  on the Expenses page; if they try to enter the same item again they get an alert instead of a
-  duplicate. Deleting the source item deletes all the shared lines too.
-- Only **product names** are listed in the split picker — no other product's data is exposed.
-- Every one of these entries still goes to the **GPM / Marketing Director** for approval.
+## Years (version 17)
 
-### Sales Entry is admin-only
-Sales Entry no longer appears for product managers or GPMs: sales are loaded by the admins from a
-sheet (Import) and everybody else keeps the read-only **Sales Tracker**. The server refuses writes
-to it for non-admins as well.
+- The Hub opens on the **current calendar year**. On 1 January 2027 it moves to 2027 by itself; nothing has to be changed.
+- Sales, expenses, conferences, events, budget lines and the dashboards show the chosen year only. The **year box** in the filter bar brings an earlier year back, so 2026 stays available as history.
+- A **budget line** belongs to one product, one line (Prints, Conferences, ...) and one year, and spend is counted against the line of its own year.
+- **Setting a new year** (Marketing Director/Manager): choose the year, then
+  - Budget Tracker: `+ Add budget line`, `Import budget`, or `Create the 2027 lines from 2026` (same lines, amount 0, last year's amount kept in Remarks); the pencil next to a planned amount edits the line.
+  - Targets: `+ Add Row`, `Import targets`, or `Create the 2027 lines from 2026` (same products and unit price, units 0).
+- A product manager's Geo-share pages show his own products only.
 
-### Filters everywhere
-Every dashboard and every table now sits under one filter bar:
-- **From / To month** (any range), **Specialty**, **Status**, **Year**, and the **brand switcher**
-  in the header (multi-select).
-- The filters apply to the dashboards' KPIs and charts, and to every table (they stack with each
-  table's own search / month / quarter / line filters).
-- Tables add their own filters where they make sense: conferences have **doctor name, organizer
-  and city**; expenses have **line**; sales have **month** and **status**.
-- One button **✕ Clear** resets the global filters.
+## The library reads Google Drive (version 18)
 
-### IQVIA grand total
-When no ATC4 is chosen, the page opens with **Grand total — all Egypt markets (516 ATC4)**: market
-size, Nerhadou sales, **MS%**, **Gr%** and **Δ share** for every selected period, followed by the
-Nerhadou-markets table which now ends with a **Total row** as well.
+- Each brand has one Drive folder; the list is at the top of `lib/drive.js` (`FOLDERS`). To add or change a brand's folder, edit that list and redeploy.
+- Inside a brand folder, the sub-folders must carry the names of the library sections (`01_Brand_Master` ... `99_Archive`). Every file under a section folder, however deep, appears in that section with **Open in Drive**, which opens the file itself. Files placed directly in the brand folder, or in a folder that matches no section, are not shown; the Director/Manager sees a note listing them.
+- The Hub stores no file and no copy of the list: Drive rows cannot be edited or deleted in the Hub. Rename, move or delete the file in Drive. A reading is kept for 30 minutes; **Read Drive again** asks Drive at once.
+- Brands without a Drive folder (and any extra file) still use **Add link to this section**: paste the file's direct link. Uploading files to the site has been removed (`api/upload.js` is gone).
+- The Drive folders must be shared as **Anyone with the link can view**.
 
-### Module IDs and the review register
-Every page has a fixed id (`MOD-DOC-03`, `MOD-TRK-03`, …) shown next to the page title, and
-every record has a short reference (`TRK-4F2A9C`) listed in **System → Modules** (admins).
-**My Team** lists the product managers of the GPM's team and their products.
+### Recommended: a Google API key
 
-## The rest of the app
-Sidebar: Dashboards (Brand Asset, Tracking, Conference and Expenses) · Brand Asset (brands, matrix, Pipelines*, 10 file sections) · Tracking System (Approvals, Sales Tracker, Targets, Budget Tracker, Digital Tracker, On-Ground Tracker and Conference Shares) · Editable Inputs (Sales Entry, Expenses, Conferences, Events and Campaigns) · System (Alerts*, Audit Log*, Modules*, My Team). * admin only. The server does not even send Pipelines to other users.
+Without a key the Hub reads the public folder page, the way a browser does. That needs no setup, but Google lists at most 50 entries of one folder there, and the page format is Google's to change.
+With a key the Hub uses the official Drive API: no 50-file limit, with dates and sizes.
 
-Linking (one source of truth = Expenses)
-- Budget Tracking: planned lines; open a line to see every item (date, month, quarter, what exactly was done, cost). Filters: month, quarter, line, status, search.
-- Budget, Digital and On-Ground Tracking are read-only views. Edit source records from Expenses, Events or Conferences.
-- Conferences and Events: a new/edited item is posted automatically to Budget Tracking (lines "Conferences" / "Events") per product by the specialty split (Conference Shares). "⚖" sets a different split for one item by selecting products and %. Auto lines are marked AUTO and follow the item's approval status. Existing Excel conferences are NOT re-posted (their budget is already in the Expenses sheets).
-- Quarters are calculated from the date everywhere (Jan-Mar = Q1 ...).
-
-Other
-- Tables: sticky header, totals row, quarter/line filters, Export, full add/edit forms, Paste from Excel and inline editing on editable inputs.
-- File sections accept **an uploaded file** (Vercel Blob, up to 5 TB, no function size limit) **or** a Google Drive / any https direct link. The uploaded file shows its real size in the row.
-  For uploads to work, create a **Blob store** in Vercel (Storage → Blob) so `BLOB_READ_WRITE_TOKEN` exists; without it the upload button says so and the Drive link still works.
-- First Admin login after deploy loads seed v4 once; rows you added or edited are kept.
-
-## Deploy
-1. Upload `index.html`, `api/`, `lib/`, `data/`, `package.json`, `vercel.json` to the repo (Vercel redeploys by itself).
-2. Vercel → Settings → Environment Variables (nothing has to be deleted):
-
-| Variable | Status |
-|---|---|
-| `SESSION_SECRET` | **required**, unchanged — also the key the daily backup is encrypted from |
-| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` (or `KV_REST_API_*`) | **required**, unchanged |
-| `ADMIN_EMAIL_1` … `ADMIN_EMAIL_5` | **new** — each with its own `ADMIN_PASSWORD_1` … `ADMIN_PASSWORD_5` (same numbering) |
-| `CRON_SECRET` | **new**, required for the nightly backup — a random string, and the Vercel Cron must be the production one |
-| `ADMIN_EMAILS` | supported — comma-separated extra admins, **added to** the built-in `mohamed.hany@nerhadou.com` |
-| `ADMIN_EMAIL` (old, singular) | still honoured — used as an extra admin |
-| `DEFAULT_PASSWORD` | optional (default `123456`) for any slot or person with no password of its own |
-| `USERS` | optional JSON to add/override people |
-| `ADMIN_PASSWORD`, `USER_PASSWORD`, `GPM_PASSWORD`, `GPM_EMAILS`, `USER_BRANDS`, `ALLOWED_DOMAIN` | **retired** — replaced by the roster (`lib/team.js`) and the per-slot passwords. Leaving them in Vercel does no harm, they are simply not read any more. |
-
-Add them under **Settings → Environment Variables → Production**. If you keep a Preview deployment,
-point it at a **separate Redis** (own `UPSTASH_*` values) so a test save never writes production data.
-
-Five things about those variables that are easy to get wrong (same list in `SPEC-KIT.md` §3 and §8):
-1. `ADMIN_EMAIL_n` only accepts `ADMIN_PASSWORD_n` — a swapped pairing is rejected.
-2. A slot with no password falls back to `DEFAULT_PASSWORD` (123456) **and** forces a change at first login.
-3. `SESSION_SECRET` is changed once (to generate `CRON_SECRET`, with `TOKEN_V=11`) — changing it again
-   makes every stored `backups/*.enc` unreadable.
-4. The Vercel Cron runs on **production only**.
-5. `data/iqvia*.json` is hidden by the rewrites in `vercel.json`; the page reads it through
-   `/api/iqvia` with its token.
-
-3. Redeploy, then sign in with an admin email and its `ADMIN_PASSWORD_n` (an admin with no slot
-   password uses `123456`) — the first screen forces a new password before any data is shown.
-4. Run the checklist in `SPEC-KIT.md` §8: `curl -I` on `/data/iqvia.json` and `/lib/team.js` (both must
-   be **404**, never 200), `GET /api/iqvia?set=market` with and without a token (200 / 401), five wrong
-   passwords (lock message), then a PM conference and an admin edit of the same row, and the browser
-   console free of CSP violations.
-
-### API
-| Route | Purpose |
-|---|---|
-| `POST /api/login` | email + password → token, role, products, team, manager; `401` with attempts left, `429` when locked, `503` when Redis is down |
-| `GET /api/data` | scoped data + `rev` (doctors lists are re-attached to the conference rows, so the page is unchanged) |
-| `PUT /api/data` | save one key — body `{key, value, known, deleted}`; admin rows merge **by id**, `auto` rows are regenerated by the server, and an empty list is refused with `409` |
-| `GET /api/version` | the 11-byte data version |
-| `POST /api/password` | password change (forced for admins and GPMs) |
-| `GET /api/team` | the team of a GPM (every team for an admin) |
-| `GET /api/audit` | audit log (admin) |
-| `GET /api/iqvia?set=market\|products` | the licensed IQVIA files, only with a valid token (`/data/*.json` itself is rewritten to `/api/shield`) |
-| `GET /api/backup` | admin: the whole database as plain JSON for the manual 💾 download (no password hashes in it) |
-| `POST /api/backup` | the nightly Cron (needs `Authorization: Bearer $CRON_SECRET`): AES-256-GCM copy on Blob, last 14 kept |
+1. Open console.cloud.google.com, create a project (or pick one).
+2. APIs & Services -> Library -> "Google Drive API" -> Enable.
+3. APIs & Services -> Credentials -> Create credentials -> API key. Restrict the key to the Google Drive API.
+4. In Vercel -> Settings -> Environment Variables add `GOOGLE_API_KEY` with that key, then redeploy.
